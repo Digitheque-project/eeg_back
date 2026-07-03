@@ -1,0 +1,10 @@
+    // Envoi de notification avec le payload qui fonctionne
+    this.notificationService.sendNotification({
+      type: "DEMANDE_EXAMEN",
+      motif: `Nouvelle demande EEG pour patient ${data.patientId}`,
+      urgence: data.urgence === "STAT" ? 3 : data.urgence === "URGENTE" ? 2 : 1,
+      sourceServiceId: "4024a951-ab12-4f08-84c9-66f5575bb737",
+      sourceServiceName: "EEG",
+      patientId: data.patientId,
+      sentAt: new Date().toISOString(),
+    }).catch(err => console.error("Erreur notification:", err.message));

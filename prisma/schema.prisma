@@ -1,0 +1,302 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum StatutDemande {
+  CREEE
+  VALIDEE
+  PLANIFIEE
+  EN_COURS
+  EN_INTERPRETATION
+  RESULTAT_DISPONIBLE
+  ACK_RECU
+  ANNULEE
+}
+
+enum TypeEEG {
+  STANDARD
+  SOMMEIL
+  AMBULATOIRE
+  VIDEO_EEG
+}
+
+enum NiveauUrgence {
+  STAT
+  URGENTE
+  NORMALE
+}
+
+enum StatutRdv {
+  EN_ATTENTE
+  REALISE
+  NON_REALISE
+  ANNULE
+}
+
+enum TypeNotification {
+  ALERTE_CRITIQUE
+  ALERTE_URGENTE
+  RAPPORT
+  SYSTEME
+}
+
+enum TypeActivite {
+  VALIDATION
+  NOUVEL_EXAMEN
+  SYSTEME
+  ARCHIVE
+}
+
+enum ActionAudit {
+  CREATION
+  CONSULTATION
+  MODIFICATION
+  VALIDATION
+  ANNULATION
+  IMPRESSION
+  ACK
+}
+
+enum RoleUtilisateur {
+  TECHNICIEN
+  CHEF_SERVICE
+  MAJOR_SERVICE
+}
+enum OrdreProfessionnel {
+  ONM
+  ONIM
+  ONSFM
+  ONPM
+  AUTRE
+  AUCUN
+}
+
+enum SourceSystem {
+  LOCAL
+  PRESCRIPTION
+  ACCUEIL
+  AUTRE
+}
+
+model Patient {
+  id                String  @id @default(uuid())
+  externalPatientId String? @unique // ID from external systems (e.g., CHU-2026-00001)
+  sourceSystem      SourceSystem @default(LOCAL)
+  isExternal        Boolean @default(false)
+
+  nom       String?
+  prenom    String?
+  age       Int?
+  sexe      String?
+  idDossier String? @unique 
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  demandes      EegDemande[]
+  rdvs          EegRdv[]
+  notifications EegNotification[]
+  activites     EegActivite[]
+
+  @@map("patient")
+}
+
+model Utilisateur {
+  id                  String             @id @default(uuid())
+  nom                 String             
+  prenom              String             
+  email               String             @unique 
+  password            String             
+  telephone           String?            
+  matricule           String?            
+  role                RoleUtilisateur
+  ordresProfessionnel OrdreProfessionnel @default(AUCUN)
+  numeroOrdre         String?            
+  signatureNumerique  String?            
+  actif               Boolean            @default(true)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  demandesPrescrits      EegDemande[]       @relation("prescripteur")
+  rdvsPrescrits          EegRdv[]           @relation("prescripteurRdv")
+  notificationsAssignees EegNotification[]
+  activites              EegActivite[]
+  resultatsValides       EegResultat[]
+  rectifications         EegRectification[]
+  audits                 EegAudit[]
+
+  @@map("utilisateur")
+}
+
+model EegDemande {
+  id                String        @id @default(uuid())
+  numeroEEG         String        @unique 
+  patientId         String
+  prescripteurId    String
+  technicienId      String?
+  typeEEG           TypeEEG
+  urgence           NiveauUrgence
+  motifPrescription String        
+  statut            StatutDemande @default(CREEE)
+  episodeSoinsId    String        
+  dateCreation      DateTime      @default(now())
+  dateRDV           DateTime?
+  dateRealisation   DateTime?
+  dateValidation    DateTime?
+  dateAck           DateTime?
+  motifAnnulation   String?
+
+  patient       Patient           @relation(fields: [patientId], references: [id])
+  prescripteur  Utilisateur       @relation("prescripteur", fields: [prescripteurId], references: [id])
+  resultat      EegResultat?
+  notifications EegNotification[]
+  audits        EegAudit[]
+  rdv           EegRdv?
+
+  @@map("eeg_demande")
+}
+
+model EegRdv {
+  id                      String        @id @default(uuid())
+  patientId               String
+  prescripteurId          String
+  demandeId               String?       @unique
+  typeEEG                 String        
+  salle                   String        
+  priorite                NiveauUrgence
+  statut                  StatutRdv     @default(EN_ATTENTE)
+  dateRdv                 DateTime
+  heureDebut              String        
+  heureFin                String        
+  dureeMinutes            Int
+  renseignementClinique   String?       
+  dateRealisation         DateTime?
+  technicienRealisateurId String?
+  createdAt               DateTime      @default(now())
+
+  patient      Patient           @relation(fields: [patientId], references: [id])
+  prescripteur Utilisateur       @relation("prescripteurRdv", fields: [prescripteurId], references: [id])
+  demande      EegDemande?       @relation(fields: [demandeId], references: [id])
+  notifications EegNotification[]
+
+  @@map("eeg_rdv")
+}
+
+model EegResultat {
+  id                     String    @id @default(uuid())
+  demandeId              String    @unique
+  fichierImagePath       String?   
+  nomFichierImage        String?   
+  dureeEnregistrement    Int?
+  rythmesDeFond          String?   
+  anomaliesDetectees     String?   
+  conclusionDiagnostique String?   
+  compteRendu            String?   
+  medecinValidateurId    String?
+  dateValidation         DateTime?
+  estImmutable           Boolean   @default(false)
+  estCritique            Boolean   @default(false)
+  version                Int       @default(0)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  demande           EegDemande         @relation(fields: [demandeId], references: [id])
+  medecinValidateur Utilisateur?       @relation(fields: [medecinValidateurId], references: [id])
+  rectifications    EegRectification[]
+
+  @@map("eeg_resultat")
+}
+
+model EegRectification {
+  id                   String   @id @default(uuid())
+  resultatId           String
+  auteurId             String
+  motif                String   
+  ancienCompteRendu    String?  
+  nouveauCompteRendu   String?  
+  ancienRythmesDeFond  String?  
+  nouveauRythmesDeFond String?  
+  ancienAnomalies      String?  
+  nouveauAnomalies     String?  
+  ancienneConclusion   String?  
+  nouvelleConclusion   String?  
+  dateRectification    DateTime @default(now())
+
+  resultat EegResultat @relation(fields: [resultatId], references: [id])
+  auteur   Utilisateur @relation(fields: [auteurId], references: [id])
+
+  @@map("eeg_rectification")
+}
+
+model EegNotification {
+  id             String           @id @default(uuid())
+  niveau         NiveauUrgence
+  type           TypeNotification
+  titre          String           
+  message        String           
+  patientId      String?
+  patientTexte   String?          
+  horodatage     DateTime         @default(now())
+  lu             Boolean          @default(false)
+  assigneeUserId String?
+  rdvId          String?
+  demandeId      String?
+  dateLecture    DateTime?
+
+  patient      Patient?                @relation(fields: [patientId], references: [id])
+  assigneeUser Utilisateur?            @relation(fields: [assigneeUserId], references: [id])
+  rdv          EegRdv?                 @relation(fields: [rdvId], references: [id])
+  demande      EegDemande?             @relation(fields: [demandeId], references: [id])
+  actions      EegNotificationAction[]
+
+  @@map("eeg_notification")
+}
+
+model EegNotificationAction {
+  id             String @id @default(uuid())
+  notificationId String
+  label          String 
+  style          String 
+  ordre          Int
+
+  notification EegNotification @relation(fields: [notificationId], references: [id])
+
+  @@map("eeg_notification_action")
+}
+
+model EegActivite {
+  id          String       @id @default(uuid())
+  ts          DateTime     @default(now())
+  type        TypeActivite
+  description String       
+  userId      String?
+  patientId   String?
+
+  user    Utilisateur? @relation(fields: [userId], references: [id])
+  patient Patient?     @relation(fields: [patientId], references: [id])
+
+  @@map("eeg_activite")
+}
+
+model EegAudit {
+  id            String      @id @default(uuid())
+  utilisateurId String
+  role          String      
+  action        ActionAudit
+  entite        String      
+  entiteId      String
+  patientId     String
+  detail        Json?
+  dateAction    DateTime    @default(now())
+  demandeId     String?
+
+  utilisateur Utilisateur @relation(fields: [utilisateurId], references: [id])
+  demande     EegDemande? @relation(fields: [demandeId], references: [id])
+
+  @@map("eeg_audit")
+}
