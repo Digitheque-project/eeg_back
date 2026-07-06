@@ -60,18 +60,6 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 # Backups créés pendant les corrections
 *.bak
 *.bak2
-
-# Fichiers parasites
-Build
-Checking
-Cloning
-Common
-Docs
-Running
-tsc
-eeg_back@0.0.1
-*.bak
-*.bak2
 *.bak3
 *.bak4
 backup_*/

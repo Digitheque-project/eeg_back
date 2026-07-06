@@ -11,76 +11,54 @@ export class DemandesService {
     private readonly patientLookup: PatientLookupService,
   ) {}
 
-  private async enrichDemandePatient(demande: any) {
-    if (!demande || !demande.patient) return demande;
-    if (!demande.patient.isExternal) return demande;
-    const info = await this.patientLookup.getPatientInfoWithExternalLookup(demande.patient);
-    return {
-      ...demande,
-      patient: {
-        ...demande.patient,
-        nom: info.nom,
-        prenom: info.prenom,
-        age: info.age,
-        sexe: info.sexe
-      }
-    };
-  }
-
-  private async enrichDemandes(demandes: any[]) {
-    return Promise.all(demandes.map(d => this.enrichDemandePatient(d)));
-  }
-
   async getWorklist(role: string) {
     switch (role) {
       case 'MEDECIN_SERVICE':
         return {
-          aValider: await this.enrichDemandes(await this.prisma.eegDemande.findMany({
+          aValider: await this.patientLookup.attachPatientInfoToMany(await this.prisma.eegDemande.findMany({
             where: { statut: 'CREEE' },
-            include: { patient: true, prescripteur: true },
+            include: { prescripteur: true },
             orderBy: { dateCreation: 'asc' },
           })),
-          aInterpreter: await this.enrichDemandes(await this.prisma.eegDemande.findMany({
+          aInterpreter: await this.patientLookup.attachPatientInfoToMany(await this.prisma.eegDemande.findMany({
             where: { statut: 'EN_COURS' },
-            include: { patient: true, prescripteur: true, resultat: true },
+            include: { prescripteur: true, resultat: true },
             orderBy: { dateRealisation: 'asc' },
           })),
         };
       case 'TECHNICIEN':
         return {
-          statUrgents: await this.enrichDemandes(await this.prisma.eegDemande.findMany({
+          statUrgents: await this.patientLookup.attachPatientInfoToMany(await this.prisma.eegDemande.findMany({
             where: { statut: 'CREEE', urgence: 'STAT' },
-            include: { patient: true },
             orderBy: { dateCreation: 'asc' },
           })),
-          rdvDuJour: await this.enrichDemandes(await this.prisma.eegDemande.findMany({
+          rdvDuJour: await this.patientLookup.attachPatientInfoToMany(await this.prisma.eegDemande.findMany({
             where: { statut: 'PLANIFIEE' },
-            include: { patient: true, rdv: true },
+            include: { rdv: true },
             orderBy: { dateRDV: 'asc' },
           })),
         };
       case 'CHEF_SERVICE':
         return {
-          aValider: await this.enrichDemandes(await this.prisma.eegDemande.findMany({
+          aValider: await this.patientLookup.attachPatientInfoToMany(await this.prisma.eegDemande.findMany({
             where: { statut: 'CREEE' },
-            include: { patient: true, prescripteur: true },
+            include: { prescripteur: true },
             orderBy: [{ urgence: 'asc' }, { dateCreation: 'asc' }],
           })),
-          aPlanifier: await this.enrichDemandes(await this.prisma.eegDemande.findMany({
+          aPlanifier: await this.patientLookup.attachPatientInfoToMany(await this.prisma.eegDemande.findMany({
             where: { statut: 'VALIDEE' },
-            include: { patient: true },
             orderBy: { dateCreation: 'asc' },
           })),
-          aValiderCR: await this.enrichDemandes(await this.prisma.eegDemande.findMany({
+          aValiderCR: await this.patientLookup.attachPatientInfoToMany(await this.prisma.eegDemande.findMany({
             where: { statut: 'EN_INTERPRETATION' },
-            include: { patient: true, resultat: true },
+            include: { resultat: true },
             orderBy: { dateCreation: 'asc' },
           })),
         };
       case 'MAJOR_SERVICE':
         return {
-          toutes: await this.enrichDemandes(await this.prisma.eegDemande.findMany({
-            include: { patient: true, prescripteur: true, resultat: true, rdv: true },
+          toutes: await this.patientLookup.attachPatientInfoToMany(await this.prisma.eegDemande.findMany({
+            include: { prescripteur: true, resultat: true, rdv: true },
             orderBy: { dateCreation: 'desc' },
             take: 50,
           })),
@@ -93,19 +71,19 @@ export class DemandesService {
   async getDemandeById(id: string) {
     const d = await this.prisma.eegDemande.findUnique({
       where: { id },
-      include: { patient: true, prescripteur: true, resultat: true, rdv: true },
+      include: { prescripteur: true, resultat: true, rdv: true },
     });
     if (!d) throw new NotFoundException(`Demande ${id} introuvable`);
-    return this.enrichDemandePatient(d);
+    return this.patientLookup.attachPatientInfo(d);
   }
 
   async getDemandesByPatient(patientId: string) {
     const demandes = await this.prisma.eegDemande.findMany({
       where: { patientId },
-      include: { resultat: true, patient: true },
+      include: { resultat: true },
       orderBy: { dateCreation: 'desc' },
     });
-    return this.enrichDemandes(demandes);
+    return this.patientLookup.attachPatientInfoToMany(demandes);
   }
 
   async validerDemande(id: string, medecinId: string) {
@@ -314,12 +292,6 @@ export class DemandesService {
   }
 
   async creerDemande(data: any, prescripteurId: string) {
-    // Get or create patient (supports external patients)
-    const patient = await this.patientLookup.getOrCreateExternalPatient(
-      data.patientId,
-      data.patient, // Optional patient info
-    );
-
     // Envoi de notification simplifié
     this.notificationService.sendNotification({
       type: "DEMANDE_EXAMEN",
@@ -327,13 +299,13 @@ export class DemandesService {
       urgence: data.urgence === "STAT" ? 3 : data.urgence === "URGENTE" ? 2 : 1,
       sourceServiceId: process.env.EEG_SERVICE_ID,
       sourceServiceName: "EEG",
-      patientId: patient.id,
+      patientId: data.patientId,
       sentAt: new Date().toISOString(),
     }).catch(err => console.error("Erreur notification:", err.message));
 
     const demande = await this.prisma.eegDemande.create({
       data: {
-        patientId: patient.id,
+        patientId: data.patientId,
         prescripteurId: prescripteurId,
         typeEEG: data.typeEEG,
         urgence: data.urgence || 'NORMALE',
@@ -341,8 +313,8 @@ export class DemandesService {
         episodeSoinsId: data.episodeSoinsId || data.chuId || 'EXTERNE',
         numeroEEG: `EEG-${Date.now()}`,
       },
-      include: { patient: true, prescripteur: true },
+      include: { prescripteur: true },
     });
-    return demande;
+    return this.patientLookup.attachPatientInfo(demande, data.patient);
   }
 }

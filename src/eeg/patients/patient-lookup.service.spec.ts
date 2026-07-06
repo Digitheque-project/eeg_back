@@ -2,26 +2,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { PatientLookupService } from './patient-lookup.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AccueilClientService } from './accueil-client.service';
-import { Patient, SourceSystem } from '@prisma/client';
 
 describe('PatientLookupService', () => {
   let service: PatientLookupService;
   let prismaService: PrismaService;
   let accueilClient: AccueilClientService;
-
-  const mockPatient: Patient = {
-    id: 'local-uuid-123',
-    externalPatientId: 'CHU-2026-00001',
-    sourceSystem: SourceSystem.PRESCRIPTION,
-    isExternal: true,
-    nom: null,
-    prenom: null,
-    age: null,
-    sexe: null,
-    idDossier: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -30,10 +15,12 @@ describe('PatientLookupService', () => {
         {
           provide: PrismaService,
           useValue: {
-            patient: {
-              findFirst: jest.fn(),
-              create: jest.fn(),
+            eegDossier: {
+              findUnique: jest.fn(),
+              upsert: jest.fn(),
             },
+            eegDemande: { count: jest.fn() },
+            eegRdv: { count: jest.fn() },
           },
         },
         {
@@ -54,101 +41,79 @@ describe('PatientLookupService', () => {
     expect(service).toBeDefined();
   });
 
-  describe('getOrCreateExternalPatient', () => {
-    it('should create minimal external patient record without persisting details', async () => {
-      jest.spyOn(prismaService.patient, 'findFirst').mockResolvedValue(null);
-      jest.spyOn(prismaService.patient, 'create').mockResolvedValue(mockPatient);
-
-      const result = await service.getOrCreateExternalPatient('CHU-2026-00001', {
-        nom: 'Doe',
-        prenom: 'John',
-        age: 45,
-        sexe: 'M',
+  describe('getPatientInfo', () => {
+    it('should fetch from Accueil and merge the local idDossier', async () => {
+      jest.spyOn(prismaService.eegDossier, 'findUnique').mockResolvedValue({
+        id: 'd1', patientId: 'CHU-2026-00001', idDossier: 'DOS-001', createdAt: new Date(), updatedAt: new Date(),
+      } as any);
+      jest.spyOn(accueilClient, 'getPatientByExternalId').mockResolvedValue({
+        id: 'CHU-2026-00001', nom: 'Fresh', prenom: 'Data', age: 50, sexe: 'M',
       });
 
-      expect(prismaService.patient.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          externalPatientId: 'CHU-2026-00001',
-          isExternal: true,
-          nom: null,
-          prenom: null,
-          age: null,
-          sexe: null,
-        }),
-      );
-      expect(result).toEqual(mockPatient);
-    });
-
-    it('should return existing patient if found', async () => {
-      jest.spyOn(prismaService.patient, 'findFirst').mockResolvedValue(mockPatient);
-
-      const result = await service.getOrCreateExternalPatient('CHU-2026-00001');
-
-      expect(prismaService.patient.create).not.toHaveBeenCalled();
-      expect(result).toEqual(mockPatient);
-    });
-  });
-
-  describe('getPatientInfoWithExternalLookup', () => {
-    it('should return local data for non-external patients', async () => {
-      const localPatient: Patient = {
-        ...mockPatient,
-        isExternal: false,
-        nom: 'Local',
-        prenom: 'Patient',
-        age: 30,
-        sexe: 'F',
-      };
-
-      const result = await service.getPatientInfoWithExternalLookup(localPatient);
-
-      expect(result).toEqual({
-        nom: 'Local',
-        prenom: 'Patient',
-        age: 30,
-        sexe: 'F',
-        source: 'LOCAL',
-      });
-      expect(accueilClient.getPatientByExternalId).not.toHaveBeenCalled();
-    });
-
-    it('should fetch from Accueil for external patients', async () => {
-      const accueilData = {
-        nom: 'Fresh',
-        prenom: 'Data',
-        age: 50,
-        sexe: 'M',
-      };
-
-      jest.spyOn(accueilClient, 'getPatientByExternalId').mockResolvedValue(accueilData as any);
-
-      const result = await service.getPatientInfoWithExternalLookup(mockPatient);
+      const result = await service.getPatientInfo('CHU-2026-00001');
 
       expect(result).toEqual({
         nom: 'Fresh',
         prenom: 'Data',
         age: 50,
         sexe: 'M',
+        idDossier: 'DOS-001',
         source: 'ACCUEIL',
       });
       expect(accueilClient.getPatientByExternalId).toHaveBeenCalledWith('CHU-2026-00001');
     });
 
     it('should use fallback when Accueil is unavailable', async () => {
+      jest.spyOn(prismaService.eegDossier, 'findUnique').mockResolvedValue(null);
       jest.spyOn(accueilClient, 'getPatientByExternalId').mockResolvedValue(null);
 
-      const result = await service.getPatientInfoWithExternalLookup(
-        mockPatient,
-        { nom: 'Fallback', prenom: 'Name', age: 40, sexe: 'F' },
-      );
+      const result = await service.getPatientInfo('CHU-2026-00001', {
+        nom: 'Fallback', prenom: 'Name', age: 40, sexe: 'F',
+      });
 
       expect(result).toEqual({
         nom: 'Fallback',
         prenom: 'Name',
         age: 40,
         sexe: 'F',
+        idDossier: null,
         source: 'FALLBACK',
       });
+    });
+  });
+
+  describe('assignIdDossier', () => {
+    it('should upsert the dossier mapping', async () => {
+      jest.spyOn(prismaService.eegDossier, 'upsert').mockResolvedValue({
+        id: 'd1', patientId: 'CHU-2026-00001', idDossier: 'DOS-002', createdAt: new Date(), updatedAt: new Date(),
+      } as any);
+
+      const result = await service.assignIdDossier('CHU-2026-00001', 'DOS-002');
+
+      expect(result).toBe('DOS-002');
+      expect(prismaService.eegDossier.upsert).toHaveBeenCalledWith({
+        where: { patientId: 'CHU-2026-00001' },
+        update: { idDossier: 'DOS-002' },
+        create: { patientId: 'CHU-2026-00001', idDossier: 'DOS-002' },
+      });
+    });
+  });
+
+  describe('attachPatientInfoToMany', () => {
+    it('should enrich a list of entities carrying a patientId', async () => {
+      jest.spyOn(prismaService.eegDossier, 'findUnique').mockResolvedValue(null);
+      jest.spyOn(accueilClient, 'getPatientByExternalId').mockResolvedValue({
+        id: 'p1', nom: 'A', prenom: 'B', age: 20, sexe: 'F',
+      });
+
+      const result = await service.attachPatientInfoToMany([
+        { id: 'e1', patientId: 'p1' },
+        { id: 'e2', patientId: 'p1' },
+      ]);
+
+      expect(result).toHaveLength(2);
+      expect(result[0].patient.nom).toBe('A');
+      expect(result[1].patient.nom).toBe('A');
     });
   });
 });

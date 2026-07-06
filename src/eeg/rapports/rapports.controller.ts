@@ -1,11 +1,15 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PatientLookupService } from '../patients/patient-lookup.service';
 
 @ApiTags('Rapports')
 @Controller('eeg/rapports')
 export class RapportsController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly patientLookup: PatientLookupService,
+  ) {}
 
   @Get('activite')
   @ApiOperation({ summary: 'Volumes des demandes EEG' })
@@ -48,17 +52,21 @@ export class RapportsController {
   @Get('anomalies')
   @ApiOperation({ summary: 'Résultats critiques non ACK' })
   async getAnomalies() {
-    return this.prisma.eegResultat.findMany({
+    const resultats = await this.prisma.eegResultat.findMany({
       where: { estCritique: true },
       include: {
         demande: {
-          select: {
-            numeroEEG: true, statut: true, dateAck: true,
-            patient: { select: { nom: true, prenom: true } },
-          },
+          select: { numeroEEG: true, statut: true, dateAck: true, patientId: true },
         },
       },
       orderBy: { dateValidation: 'desc' },
     });
+
+    return Promise.all(
+      resultats.map(async (r) => {
+        const patient = await this.patientLookup.getPatientInfo(r.demande.patientId);
+        return { ...r, demande: { ...r.demande, patient } };
+      }),
+    );
   }
 }

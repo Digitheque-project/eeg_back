@@ -6,10 +6,25 @@ export interface AccueilPatientDto {
   id: string;
   nom?: string;
   prenom?: string;
-  age?: number;
-  sexe?: string;
+  sexe?: 'MALE' | 'FEMALE';
+  dateNaissance?: string;
+  cin?: string;
   chuId?: string;
   [key: string]: any;
+}
+
+export interface NormalizedPatient {
+  id: string;
+  nom: string;
+  prenom: string;
+  age: number | null;
+  sexe: 'M' | 'F' | null;
+}
+
+export interface UpdatePatientPayload {
+  nom?: string;
+  prenom?: string;
+  sexe?: 'M' | 'F';
 }
 
 @Injectable()
@@ -23,20 +38,43 @@ export class AccueilClientService {
     this.chuId = process.env.CHU_ID || '72d49761-2a65-446d-b025-15a74cac1ad4';
   }
 
+  private calculateAge(dateNaissance?: string): number | null {
+    if (!dateNaissance) return null;
+    const birth = new Date(dateNaissance);
+    if (Number.isNaN(birth.getTime())) return null;
+    const now = new Date();
+    let age = now.getFullYear() - birth.getFullYear();
+    const hasHadBirthdayThisYear =
+      now.getMonth() > birth.getMonth() ||
+      (now.getMonth() === birth.getMonth() && now.getDate() >= birth.getDate());
+    if (!hasHadBirthdayThisYear) age -= 1;
+    return age;
+  }
+
+  private normalize(raw: AccueilPatientDto): NormalizedPatient {
+    return {
+      id: raw.id,
+      nom: raw.nom ?? '',
+      prenom: raw.prenom ?? '',
+      age: this.calculateAge(raw.dateNaissance),
+      sexe: raw.sexe === 'MALE' ? 'M' : raw.sexe === 'FEMALE' ? 'F' : null,
+    };
+  }
+
   /**
    * Get patient by external ID from Accueil service
    * @param externalPatientId - External patient ID
-   * @returns Patient data or null if not found/unavailable
+   * @returns Normalized patient data or null if not found/unavailable
    */
-  async getPatientByExternalId(externalPatientId: string): Promise<AccueilPatientDto | null> {
+  async getPatientByExternalId(externalPatientId: string, chuId: string = this.chuId): Promise<NormalizedPatient | null> {
     try {
       this.logger.log(`Fetching patient ${externalPatientId} from Accueil`);
-      
+
       const response = await firstValueFrom(
         this.httpService.get<AccueilPatientDto>(
           `${this.baseUrl}/patients/${externalPatientId}`,
           {
-            params: { chuId: this.chuId },
+            params: { chuId },
             timeout: 5000,
             headers: { 'Content-Type': 'application/json' },
           },
@@ -44,16 +82,75 @@ export class AccueilClientService {
       );
 
       this.logger.log(`Successfully fetched patient ${externalPatientId} from Accueil`);
-      return response.data;
+      return this.normalize(response.data);
     } catch (error) {
       if (error.response?.status === 404) {
         this.logger.warn(`Patient ${externalPatientId} not found in Accueil (404)`);
         return null;
       }
-      
+
       this.logger.warn(
         `Failed to fetch patient ${externalPatientId} from Accueil: ${error.message}`,
       );
+      return null;
+    }
+  }
+
+  /**
+   * List patients for a CHU, optionally filtered client-side by a search term
+   */
+  async listPatients(chuId: string = this.chuId, search?: string): Promise<NormalizedPatient[]> {
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get<AccueilPatientDto[]>(`${this.baseUrl}/patients`, {
+          params: { chuId },
+          timeout: 5000,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+      const patients = (response.data || []).map((p) => this.normalize(p));
+      if (!search) return patients;
+
+      const term = search.toLowerCase();
+      return patients.filter(
+        (p) => p.nom.toLowerCase().includes(term) || p.prenom.toLowerCase().includes(term),
+      );
+    } catch (error) {
+      this.logger.warn(`Failed to list patients from Accueil: ${error.message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Update patient demographic fields via Accueil
+   */
+  async updatePatient(
+    id: string,
+    dto: UpdatePatientPayload,
+    chuId: string = this.chuId,
+  ): Promise<NormalizedPatient | null> {
+    try {
+      const payload: Record<string, any> = {};
+      if (dto.nom !== undefined) payload.nom = dto.nom;
+      if (dto.prenom !== undefined) payload.prenom = dto.prenom;
+      if (dto.sexe !== undefined) payload.sexe = dto.sexe === 'M' ? 'MALE' : 'FEMALE';
+
+      const response = await firstValueFrom(
+        this.httpService.patch<AccueilPatientDto>(
+          `${this.baseUrl}/patients/${id}`,
+          payload,
+          {
+            params: { chuId },
+            timeout: 5000,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      );
+
+      return this.normalize(response.data);
+    } catch (error) {
+      this.logger.warn(`Failed to update patient ${id} in Accueil: ${error.message}`);
       return null;
     }
   }

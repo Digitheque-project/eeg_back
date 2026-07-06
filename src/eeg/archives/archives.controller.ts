@@ -1,11 +1,15 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiQuery, ApiResponse } from '@nestjs/swagger';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PatientLookupService } from '../patients/patient-lookup.service';
 
 @ApiTags('Archives')
 @Controller('eeg/archives')
 export class ArchivesController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly patientLookup: PatientLookupService,
+  ) {}
 
   @Get()
   @ApiOperation({
@@ -69,7 +73,7 @@ export class ArchivesController {
               statut: true,
               dateCreation: true,
               dateAck: true,
-              patient: { select: { id: true, nom: true, prenom: true, age: true, sexe: true, idDossier: true } },
+              patientId: true,
               prescripteur: { select: { nom: true, prenom: true, role: true } },
             },
           },
@@ -88,8 +92,15 @@ export class ArchivesController {
       }),
     ]);
 
+    const data = await Promise.all(
+      resultats.map(async (r) => {
+        const patient = await this.patientLookup.getPatientInfo(r.demande.patientId);
+        return { ...r, demande: { ...r.demande, patient } };
+      }),
+    );
+
     return {
-      data: resultats,
+      data,
       pagination: {
         total,
         page: pageNum,

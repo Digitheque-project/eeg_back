@@ -10,7 +10,6 @@ import {
 import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 import { ExternalPrescriptionService } from './external-prescription.service';
 import { ExternalEegPrescriptionDto } from '../demandes/dto/external-prescription.dto';
-import { PatientLookupService } from '../patients/patient-lookup.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
 @ApiTags('External - Prescriptions')
@@ -18,7 +17,6 @@ import { PrismaService } from '../../prisma/prisma.service';
 export class ExternalPrescriptionController {
   constructor(
     private readonly externalPrescriptionService: ExternalPrescriptionService,
-    private readonly patientLookup: PatientLookupService,
     private readonly prisma: PrismaService,
   ) {}
 
@@ -100,33 +98,23 @@ export class ExternalPrescriptionController {
   async getPrescriptionsForExternalPatient(
     @Param('externalPatientId') externalPatientId: string,
   ) {
-    const patient = await this.patientLookup.findPatientByIdOrExternal(
-      externalPatientId,
-    );
-
-    if (!patient) {
-      return {
-        externalPatientId,
-        prescriptions: [],
-        found: false,
-      };
-    }
+    const prescriptions = await this.prisma.eegDemande.findMany({
+      where: { patientId: externalPatientId },
+      select: {
+        id: true,
+        numeroEEG: true,
+        statut: true,
+        dateCreation: true,
+        urgence: true,
+      },
+      orderBy: { dateCreation: 'desc' },
+    });
 
     return {
       externalPatientId,
-      patientId: patient.id,
-      prescriptions: await this.prisma.eegDemande.findMany({
-        where: { patientId: patient.id },
-        select: {
-          id: true,
-          numeroEEG: true,
-          statut: true,
-          dateCreation: true,
-          urgence: true,
-        },
-        orderBy: { dateCreation: 'desc' },
-      }),
-      found: true,
+      patientId: externalPatientId,
+      prescriptions,
+      found: prescriptions.length > 0,
     };
   }
 }

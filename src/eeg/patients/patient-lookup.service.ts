@@ -1,7 +1,22 @@
 import { PrismaService } from '../../prisma/prisma.service';
 import { Injectable, Logger } from '@nestjs/common';
-import { Patient, SourceSystem } from '@prisma/client';
-import { AccueilClientService, AccueilPatientDto } from './accueil-client.service';
+import { AccueilClientService } from './accueil-client.service';
+
+export interface PatientInfo {
+  nom: string | null;
+  prenom: string | null;
+  age: number | null;
+  sexe: string | null;
+  idDossier: string | null;
+  source: 'ACCUEIL' | 'FALLBACK';
+}
+
+export interface PatientFallback {
+  nom?: string;
+  prenom?: string;
+  age?: number;
+  sexe?: string;
+}
 
 @Injectable()
 export class PatientLookupService {
@@ -13,153 +28,78 @@ export class PatientLookupService {
   ) {}
 
   /**
-   * Find a patient by local UUID or external patient ID
-   * @param patientId - Can be a local UUID or external ID (e.g., CHU-2026-00001)
-   * @returns Patient or null if not found
+   * Fetch live patient demographic info from Accueil, falling back to
+   * caller-provided data (e.g. from an external prescription DTO) if
+   * Accueil is unreachable or the patient isn't found there.
    */
-  async findPatientByIdOrExternal(patientId: string): Promise<Patient | null> {
-    return this.prisma.patient.findFirst({
-      where: {
-        OR: [{ id: patientId }, { externalPatientId: patientId }],
-      },
-    });
-  }
+  async getPatientInfo(patientId: string, fallback?: PatientFallback): Promise<PatientInfo> {
+    const idDossier = await this.getIdDossier(patientId);
+    const accueilPatient = await this.accueilClient.getPatientByExternalId(patientId);
 
-  /**
-   * Get or create a patient for external prescriptions
-   * For external patients, only creates a minimal local record for FK relations.
-   * Patient details (nom, prenom, age, sexe) are NOT persisted locally for external patients.
-   * These columns remain as cache best-effort only - the source of truth is Accueil service.
-   * @param patientId - External patient ID
-   * @param patientInfo - Optional patient information (used only as fallback if Accueil unavailable)
-   * @returns Created or found Patient (minimal record for external patients)
-   */
-  async getOrCreateExternalPatient(
-    patientId: string,
-    patientInfo?: {
-      nom?: string;
-      prenom?: string;
-      age?: number;
-      sexe?: string;
-    },
-  ): Promise<Patient> {
-    let patient = await this.findPatientByIdOrExternal(patientId);
-
-    if (!patient) {
-      patient = await this.prisma.patient.create({
-        data: {
-          externalPatientId: patientId,
-          sourceSystem: 'PRESCRIPTION' as SourceSystem,
-          isExternal: true,
-          // For external patients, do NOT persist nom/prenom/age/sexe
-          // These columns are cache best-effort only, source of truth is Accueil
-          nom: null,
-          prenom: null,
-          age: null,
-          sexe: null,
-        },
-      });
-      this.logger.log(`Created minimal external patient record: ${patient.id} (external ID: ${patientId})`);
-    }
-
-    return patient;
-  }
-
-  /**
-   * Get patient information with external lookup from Accueil
-   * For external patients, fetches fresh data from Accueil service.
-   * Falls back to local cache or provided patientInfo if Accueil is unavailable.
-   * @param patient - Patient record from local database
-   * @param fallbackPatientInfo - Optional fallback patient info from prescription DTO
-   * @returns Patient information with fresh data from Accueil if available
-   */
-  async getPatientInfoWithExternalLookup(
-    patient: Patient,
-    fallbackPatientInfo?: {
-      nom?: string;
-      prenom?: string;
-      age?: number;
-      sexe?: string;
-    },
-  ): Promise<{
-    nom: string | null;
-    prenom: string | null;
-    age: number | null;
-    sexe: string | null;
-    source: 'LOCAL' | 'ACCUEIL' | 'FALLBACK';
-  }> {
-    // For local patients, return local data
-    if (!patient.isExternal) {
+    if (accueilPatient) {
       return {
-        nom: patient.nom,
-        prenom: patient.prenom,
-        age: patient.age,
-        sexe: patient.sexe,
-        source: 'LOCAL',
+        nom: accueilPatient.nom || null,
+        prenom: accueilPatient.prenom || null,
+        age: accueilPatient.age,
+        sexe: accueilPatient.sexe,
+        idDossier,
+        source: 'ACCUEIL',
       };
     }
 
-    // For external patients, try to fetch from Accueil
-    if (patient.externalPatientId) {
-      const accueilPatient = await this.accueilClient.getPatientByExternalId(
-        patient.externalPatientId,
-      );
-
-      if (accueilPatient) {
-        this.logger.log(`Fetched fresh patient data from Accueil for ${patient.externalPatientId}`);
-        return {
-          nom: accueilPatient.nom || null,
-          prenom: accueilPatient.prenom || null,
-          age: accueilPatient.age || null,
-          sexe: accueilPatient.sexe || null,
-          source: 'ACCUEIL',
-        };
-      }
-    }
-
-    // Fallback to provided patientInfo from DTO or local cache
-    this.logger.warn(`Accueil unavailable for patient ${patient.externalPatientId}, using fallback`);
+    this.logger.warn(`Accueil unavailable for patient ${patientId}, using fallback`);
     return {
-      nom: fallbackPatientInfo?.nom ?? patient.nom,
-      prenom: fallbackPatientInfo?.prenom ?? patient.prenom,
-      age: fallbackPatientInfo?.age ?? patient.age,
-      sexe: fallbackPatientInfo?.sexe ?? patient.sexe,
+      nom: fallback?.nom ?? null,
+      prenom: fallback?.prenom ?? null,
+      age: fallback?.age ?? null,
+      sexe: fallback?.sexe ?? null,
+      idDossier,
       source: 'FALLBACK',
     };
   }
 
   /**
-   * Create or update an external patient with upsert
-   * @param externalPatientId - External patient ID
-   * @param patientInfo - Patient information to create/update
-   * @returns Patient record
+   * EEG-local dossier number assigned to an (external) patientId.
+   * idDossier has no equivalent in Accueil — it's purely local bookkeeping.
    */
-  async upsertExternalPatient(
-    externalPatientId: string,
-    patientInfo?: {
-      nom?: string;
-      prenom?: string;
-      age?: number;
-      sexe?: string;
-    },
-  ): Promise<Patient> {
-    return this.prisma.patient.upsert({
-      where: { externalPatientId },
-      update: {
-        nom: patientInfo?.nom,
-        prenom: patientInfo?.prenom,
-        age: patientInfo?.age,
-        sexe: patientInfo?.sexe,
-      },
-      create: {
-        externalPatientId,
-        sourceSystem: 'PRESCRIPTION' as SourceSystem,
-        isExternal: true,
-        nom: patientInfo?.nom,
-        prenom: patientInfo?.prenom,
-        age: patientInfo?.age,
-        sexe: patientInfo?.sexe,
-      },
+  async getIdDossier(patientId: string): Promise<string | null> {
+    const dossier = await this.prisma.eegDossier.findUnique({ where: { patientId } });
+    return dossier?.idDossier ?? null;
+  }
+
+  async assignIdDossier(patientId: string, idDossier: string): Promise<string> {
+    const dossier = await this.prisma.eegDossier.upsert({
+      where: { patientId },
+      update: { idDossier },
+      create: { patientId, idDossier },
     });
+    return dossier.idDossier;
+  }
+
+  async getPatientCounts(patientId: string): Promise<{ demandes: number; rdvs: number }> {
+    const [demandes, rdvs] = await Promise.all([
+      this.prisma.eegDemande.count({ where: { patientId } }),
+      this.prisma.eegRdv.count({ where: { patientId } }),
+    ]);
+    return { demandes, rdvs };
+  }
+
+  /**
+   * Attach a `patient` field to an entity carrying a `patientId`, replacing
+   * the old Prisma `include: { patient: true }` pattern now that there is
+   * no more local Patient relation.
+   */
+  async attachPatientInfo<T extends { patientId: string }>(
+    entity: T,
+    fallback?: PatientFallback,
+  ): Promise<T & { patient: PatientInfo }> {
+    const patient = await this.getPatientInfo(entity.patientId, fallback);
+    return { ...entity, patient };
+  }
+
+  async attachPatientInfoToMany<T extends { patientId: string }>(
+    entities: T[],
+  ): Promise<(T & { patient: PatientInfo })[]> {
+    return Promise.all(entities.map((entity) => this.attachPatientInfo(entity)));
   }
 }

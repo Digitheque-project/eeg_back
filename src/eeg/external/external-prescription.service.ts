@@ -23,15 +23,8 @@ export class ExternalPrescriptionService {
    */
   async receiveExternalPrescription(dto: ExternalEegPrescriptionDto) {
     try {
-      // Step 1: Get or create external patient
-      const patient = await this.patientLookup.getOrCreateExternalPatient(
-        dto.patientId,
-        dto.patient,
-      );
-
-      this.logger.log(
-        `Patient resolved: ${patient.id} (external: ${patient.isExternal}) - ID: ${dto.patientId}`,
-      );
+      // Step 1: the patient lives in Accueil — dto.patientId is used directly, no local record
+      this.logger.log(`Processing prescription for external patient ${dto.patientId}`);
 
       // Step 2: Get or create prescripteur (can be external too)
       const prescripteur = await this.prisma.utilisateur.upsert({
@@ -51,7 +44,7 @@ export class ExternalPrescriptionService {
       // Step 3: Create the EEG demand directly using Prisma
       const demande = await this.prisma.eegDemande.create({
         data: {
-          patientId: patient.id,
+          patientId: dto.patientId,
           prescripteurId: prescripteur.id,
           typeEEG: dto.typeEEG,
           urgence: dto.urgence || 'NORMALE',
@@ -59,12 +52,10 @@ export class ExternalPrescriptionService {
           episodeSoinsId: dto.episodeSoinsId || dto.chuId || `EXTERNAL-${Date.now()}`,
           numeroEEG: `EEG-${Date.now()}`,
         },
-        include: { patient: true, prescripteur: true },
+        include: { prescripteur: true },
       });
 
-      this.logger.log(
-        `Created EEG demand: ${demande.id} for patient ${patient.externalPatientId || patient.id}`,
-      );
+      this.logger.log(`Created EEG demand: ${demande.id} for patient ${dto.patientId}`);
 
       // Step 3.5 : Créer notification locale (pour l'affichage dans le frontend EEG)
       await this.prisma.eegNotification.create({
@@ -74,7 +65,7 @@ export class ExternalPrescriptionService {
           message: `Patient ${dto.patientId} — ${dto.renseignements?.substring(0, 100) ?? ''}`,
           niveau: dto.urgence === 'STAT' ? 'STAT' : dto.urgence === 'URGENTE' ? 'URGENTE' : 'NORMALE',
           lu: false,
-          patientId: patient.id,
+          patientId: dto.patientId,
           demandeId: demande.id,
           horodatage: new Date(),
         },
@@ -90,7 +81,7 @@ export class ExternalPrescriptionService {
         urgence: dto.urgence === 'STAT' ? 3 : dto.urgence === 'URGENTE' ? 2 : 1,
         sourceServiceId: process.env.EEG_SERVICE_ID,
         sourceServiceName: serviceNom,
-        patientId: patient.id,
+        patientId: dto.patientId,
         sentAt: new Date().toISOString(),
       }).catch((err) => this.logger.warn(`Notification non envoyée: ${err.message}`));
 
@@ -101,8 +92,8 @@ export class ExternalPrescriptionService {
         data: {
           demandeId: demande.id,
           numeroEEG: demande.numeroEEG,
-          patientId: patient.id,
-          externalPatientId: patient.externalPatientId,
+          patientId: dto.patientId,
+          externalPatientId: dto.patientId,
           statut: demande.statut,
           createdAt: demande.dateCreation,
         },
@@ -131,7 +122,7 @@ export class ExternalPrescriptionService {
   async getPrescriptionStatus(demandeId: string) {
     const demande = await this.prisma.eegDemande.findUnique({
       where: { id: demandeId },
-      include: { patient: true, resultat: true },
+      include: { resultat: true },
     });
 
     if (!demande) {
@@ -142,7 +133,7 @@ export class ExternalPrescriptionService {
       demandeId: demande.id,
       numeroEEG: demande.numeroEEG,
       statut: demande.statut,
-      patientId: demande.patient.externalPatientId || demande.patient.id,
+      patientId: demande.patientId,
       dateCreation: demande.dateCreation,
       dateRealisation: demande.dateRealisation,
       dateValidation: demande.dateValidation,

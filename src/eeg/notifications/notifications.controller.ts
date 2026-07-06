@@ -6,10 +6,20 @@ import {
   Query,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PatientLookupService } from '../patients/patient-lookup.service';
 
 @Controller('eeg/notifications')
 export class NotificationsController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly patientLookup: PatientLookupService,
+  ) {}
+
+  private async attachPatientIfAny<T extends { patientId: string | null }>(notif: T) {
+    if (!notif.patientId) return { ...notif, patient: null };
+    const patient = await this.patientLookup.getPatientInfo(notif.patientId);
+    return { ...notif, patient };
+  }
 
   // GET /eeg/notifications
   // GET /eeg/notifications?lu=false
@@ -21,12 +31,9 @@ export class NotificationsController {
       where.lu = lu === 'true';
     }
 
-    return this.prisma.eegNotification.findMany({
+    const notifications = await this.prisma.eegNotification.findMany({
       where,
       include: {
-        patient: {
-          select: { nom: true, prenom: true, idDossier: true },
-        },
         demande: {
           select: { numeroEEG: true, statut: true, urgence: true },
         },
@@ -35,6 +42,7 @@ export class NotificationsController {
       orderBy: { horodatage: 'desc' },
       take: 100,
     });
+    return Promise.all(notifications.map((n) => this.attachPatientIfAny(n)));
   }
 
   // GET /eeg/notifications/count
@@ -50,14 +58,15 @@ export class NotificationsController {
   // GET /eeg/notifications/:id
   @Get(':id')
   async getNotificationById(@Param('id') id: string) {
-    return this.prisma.eegNotification.findUnique({
+    const notification = await this.prisma.eegNotification.findUnique({
       where: { id },
       include: {
-        patient: true,
         demande: true,
         actions: true,
       },
     });
+    if (!notification) return null;
+    return this.attachPatientIfAny(notification);
   }
 
   // PATCH /eeg/notifications/:id/lu
