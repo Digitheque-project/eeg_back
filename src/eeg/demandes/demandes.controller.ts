@@ -8,8 +8,11 @@ import {
   Query,
   Request,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiParam } from '@nestjs/swagger';
 import { DemandesService } from './demandes.service';
+import { CreateDemandeDto } from './dto/create-demande.dto';
+import { PlanifierRdvDto } from './dto/planifier-rdv.dto';
+import { InterpreterDemandeDto } from './dto/interpreter-demande.dto';
 
 @ApiTags('Demandes')
 @Controller('eeg/demandes')
@@ -18,21 +21,7 @@ export class DemandesController {
 
   @Post()
   @ApiOperation({ summary: "Créer une nouvelle demande EEG" })
-  @ApiBody({
-    schema: {
-      type: "object",
-      properties: {
-        patientId: { type: "string", example: "4b0f2a29-af9b-4e93-9db6-78c27d19c30c" },
-        episodeSoinsId: { type: "string", example: "EPI-001" },
-        typeEEG: { type: "string", enum: ["STANDARD", "SOMMEIL", "AMBULATOIRE", "VIDEO_EEG"], example: "STANDARD" },
-        urgence: { type: "string", enum: ["STAT", "URGENTE", "NORMALE"], example: "URGENTE" },
-        motifPrescription: { type: "string", example: "Motif de la prescription" }
-      },
-      required: ["patientId", "episodeSoinsId", "typeEEG", "urgence", "motifPrescription"]
-    }
-  })
-  @ApiOperation({ summary: 'Créer une nouvelle demande EEG' })
-  async creerDemande(@Body() dto: any, @Request() req: any) {
+  async creerDemande(@Body() dto: CreateDemandeDto, @Request() req: any) {
     const prescripteurId = req.user?.id ?? 'int-00000000-0000-0000-0000-000000000004';
     return this.demandesService.creerDemande(dto, prescripteurId);
   }
@@ -57,8 +46,11 @@ export class DemandesController {
     return this.demandesService.getDemandeById(id);
   }
 
+  // RÈGLE MÉTIER (Phase 2) — à faire respecter par le RolesGuard en Phase 6
+  // Rôle(s) autorisé(s) : CHEF_SERVICE, MEDECIN_SERVICE
+  // Statut requis de la demande avant action : CREEE
   @Patch(':id/valider')
-  @ApiOperation({ summary: 'MEDECIN_SERVICE : Valider une demande (CREEE → VALIDEE)' })
+  @ApiOperation({ summary: 'CHEF_SERVICE / MEDECIN_SERVICE : Valider une demande (CREEE → VALIDEE)' })
   validerDemande(@Param('id') id: string, @Request() req: any) {
     const medecinId = req.user?.id ?? 'int-00000000-0000-0000-0000-000000000004';
     return this.demandesService.validerDemande(id, medecinId);
@@ -71,8 +63,11 @@ export class DemandesController {
     return this.demandesService.annulerDemande(id, motif, userId);
   }
 
+  // RÈGLE MÉTIER (Phase 2) — à faire respecter par le RolesGuard en Phase 6
+  // Rôle(s) autorisé(s) : CHEF_SERVICE, MEDECIN_SERVICE
+  // Statut requis de la demande avant action : CREEE
   @Patch(':id/refuser')
-  @ApiOperation({ summary: 'MEDECIN_SERVICE : Refuser une demande avec motif' })
+  @ApiOperation({ summary: 'CHEF_SERVICE / MEDECIN_SERVICE : Refuser une demande avec motif' })
   refuserDemande(
     @Param('id') id: string,
     @Body('motif') motif: string,
@@ -82,44 +77,60 @@ export class DemandesController {
     return this.demandesService.refuserDemande(id, motif, medecinId);
   }
 
+  // RÈGLE MÉTIER (Phase 2) — à faire respecter par le RolesGuard en Phase 6
+  // Rôle(s) autorisé(s) : CHEF_SERVICE, TECHNICIEN
+  // Statut requis de la demande avant action : VALIDEE
   @Patch(':id/planifier')
-  @ApiOperation({ summary: 'CHEF_SERVICE : Planifier un RDV (VALIDEE → PLANIFIEE)' })
+  @ApiOperation({ summary: 'CHEF_SERVICE / TECHNICIEN : Planifier un RDV (VALIDEE → PLANIFIEE)' })
   planifierRdv(
     @Param('id') id: string,
-    @Body() dto: any,
+    @Body() dto: PlanifierRdvDto,
     @Request() req: any,
   ) {
     const chefId = req.user?.id ?? 'med-00000000-0000-0000-0000-000000000001';
     return this.demandesService.planifierRdv(id, dto, chefId);
   }
 
+  // RÈGLE MÉTIER (Phase 2) — à faire respecter par le RolesGuard en Phase 6
+  // Rôle(s) autorisé(s) : TECHNICIEN
+  // Statut requis de la demande avant action : CREEE avec urgence STAT (prise en charge immédiate)
+  //   ou PLANIFIEE (examen planifié)
   @Patch(':id/realiser')
-  @ApiOperation({ summary: 'TECHNICIEN : Réaliser un examen' })
+  @ApiOperation({ summary: 'TECHNICIEN : Réaliser un examen (CREEE+STAT ou PLANIFIEE → EN_COURS)' })
   realiserDemande(@Param('id') id: string, @Request() req: any) {
     const technicienId = req.user?.id ?? 'tec-00000000-0000-0000-0000-000000000002';
     return this.demandesService.realiserDemande(id, technicienId);
   }
 
+  // RÈGLE MÉTIER (Phase 2) — à faire respecter par le RolesGuard en Phase 6
+  // Rôle(s) autorisé(s) : MEDECIN_SERVICE
+  // Statut requis de la demande avant action : EN_COURS
   @Patch(':id/interpreter')
-  @ApiOperation({ summary: 'MEDECIN_SERVICE : Remplir le brouillon CR' })
+  @ApiOperation({ summary: 'MEDECIN_SERVICE : Rédiger le brouillon compte rendu (EN_COURS → EN_INTERPRETATION)' })
   interpreterDemande(
     @Param('id') id: string,
-    @Body() brouillon: any,
+    @Body() brouillon: InterpreterDemandeDto,
     @Request() req: any,
   ) {
     const medecinId = req.user?.id ?? 'int-00000000-0000-0000-0000-000000000004';
     return this.demandesService.interpreterDemande(id, brouillon, medecinId);
   }
 
+  // RÈGLE MÉTIER (Phase 2) — à faire respecter par le RolesGuard en Phase 6
+  // Rôle(s) autorisé(s) : CHEF_SERVICE
+  // Statut requis de la demande avant action : EN_INTERPRETATION
   @Patch(':id/valider-cr')
-  @ApiOperation({ summary: 'CHEF_SERVICE : Valider le compte rendu final' })
+  @ApiOperation({ summary: 'CHEF_SERVICE : Valider le compte rendu final (EN_INTERPRETATION → RESULTAT_DISPONIBLE)' })
   validerCR(@Param('id') id: string, @Request() req: any) {
     const chefId = req.user?.id ?? 'med-00000000-0000-0000-0000-000000000001';
     return this.demandesService.validerCR(id, chefId);
   }
 
+  // RÈGLE MÉTIER (Phase 2) — à faire respecter par le RolesGuard en Phase 6
+  // Rôle(s) autorisé(s) : MEDECIN_SERVICE (prescripteur de la demande)
+  // Statut requis de la demande avant action : RESULTAT_DISPONIBLE
   @Patch(':id/ack')
-  @ApiOperation({ summary: 'Accusé de réception du résultat' })
+  @ApiOperation({ summary: 'MEDECIN_SERVICE : Accusé de réception du résultat (RESULTAT_DISPONIBLE → ACK_RECU)' })
   accuserReception(@Param('id') id: string, @Request() req: any) {
     const medecinId = req.user?.id ?? 'int-00000000-0000-0000-0000-000000000004';
     return this.demandesService.accuserReception(id, medecinId);

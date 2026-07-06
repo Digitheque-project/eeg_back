@@ -244,20 +244,55 @@ export class DemandesService {
     if (!((d.statut === 'CREEE' && d.urgence === 'STAT') || d.statut === 'PLANIFIEE')) {
       throw new BadRequestException(`Statut invalide: ${d.statut}`);
     }
+
+    // Vérification de la cohérence avec le RDV lié (Phase 4)
+    // Si un RDV est associé à la demande, son statut ne doit pas être ANNULE ou NON_REALISE
+    if (d.rdv) {
+      const statutRdv = (d.rdv as any).statut as string;
+      if (statutRdv === 'ANNULE' || statutRdv === 'NON_REALISE') {
+        throw new BadRequestException(
+          'Impossible de réaliser cette demande : le rendez-vous associé est annulé ou non réalisé',
+        );
+      }
+    }
+    // Si aucun RDV n'est lié (ex. demande CREEE + STAT), la vérification est ignorée
+
     return this.prisma.eegDemande.update({ where: { id }, data: { statut: 'EN_COURS', dateRealisation: new Date() } });
   }
+
 
   async interpreterDemande(id: string, brouillon: any, medecinId: string) {
     const d = await this.getDemandeById(id);
     if (d.statut !== 'EN_COURS') throw new BadRequestException(`Statut invalide: ${d.statut}`);
+
     const existant = await this.prisma.eegResultat.findUnique({ where: { demandeId: id } });
+
+    // Contrôle d'immutabilité : un résultat déjà figé ne peut plus être réinterprété directement
+    if (existant?.estImmutable) {
+      throw new BadRequestException(
+        'Ce résultat est immuable et ne peut plus être modifié directement (utiliser la rectification)',
+      );
+    }
+
+    // Champs écrits explicitement pour éviter la persistance de champs non désirés
+    const data = {
+      rythmesDeFond:          brouillon.rythmesDeFond          ?? null,
+      anomaliesDetectees:     brouillon.anomaliesDetectees     ?? null,
+      conclusionDiagnostique: brouillon.conclusionDiagnostique ?? null,
+      compteRendu:            brouillon.compteRendu            ?? null,
+      estCritique:            brouillon.estCritique            ?? false,
+    };
+
     if (existant) {
-      await this.prisma.eegResultat.update({ where: { demandeId: id }, data: { ...brouillon } });
+      await this.prisma.eegResultat.update({ where: { demandeId: id }, data });
     } else {
-      await this.prisma.eegResultat.create({ data: { demandeId: id, ...brouillon, medecinValidateurId: medecinId } });
+      await this.prisma.eegResultat.create({
+        data: { demandeId: id, ...data, medecinValidateurId: medecinId },
+      });
     }
     return this.prisma.eegDemande.update({ where: { id }, data: { statut: 'EN_INTERPRETATION' } });
   }
+
 
   async validerCR(id: string, chefId: string) {
     const d = await this.getDemandeById(id);

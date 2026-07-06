@@ -7,14 +7,34 @@ import {
   Param,
   Body,
   Query,
+  Logger,
+  NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StatutRdv } from '@prisma/client';
-
 import { PatientLookupService } from '../patients/patient-lookup.service';
+import { CreateRdvDto } from './dto/create-rdv.dto';
+import { ModifierRdvDto } from './dto/modifier-rdv.dto';
+import { RealiserRdvDto } from './dto/realiser-rdv.dto';
 
 @Controller('eeg/rdvs')
 export class RdvsController {
+  private readonly logger = new Logger(RdvsController.name);
+
+  // Ordre de progression des statuts EegDemande (Phase 4).
+  // Aucune constante centralisée n'existe dans le projet — cette définition
+  // doit être déplacée dans un fichier partagé lors du nettoyage Phase 5.
+  private static readonly STATUTS_ORDONNES: string[] = [
+    'CREEE',           // 1
+    'VALIDEE',         // 2
+    'PLANIFIEE',       // 3
+    'EN_COURS',        // 4
+    'EN_INTERPRETATION', // 5
+    'RESULTAT_DISPONIBLE', // 6
+    'ACK_RECU',        // 7
+    // ANNULEE est un état terminal hors chaîne principale
+  ];
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly patientLookup: PatientLookupService,
@@ -123,19 +143,19 @@ export class RdvsController {
   }
 
   @Post()
-  async creerRdv(@Body() body: any) {
+  async creerRdv(@Body() body: CreateRdvDto) {
     return this.prisma.eegRdv.create({
       data: {
-        patientId: body.patientId,
-        prescripteurId: body.prescripteurId,
-        demandeId: body.demandeId ?? null,
-        typeEEG: body.typeEEG,
-        salle: body.salle,
-        priorite: body.priorite,
-        dateRdv: new Date(body.dateRdv),
-        heureDebut: body.heureDebut,
-        heureFin: body.heureFin,
-        dureeMinutes: body.dureeMinutes,
+        patientId:             body.patientId,
+        prescripteurId:        body.prescripteurId,
+        demandeId:             body.demandeId ?? null,
+        typeEEG:               body.typeEEG,
+        salle:                 body.salle,
+        priorite:              body.priorite,
+        dateRdv:               new Date(body.dateRdv),
+        heureDebut:            body.heureDebut,
+        heureFin:              body.heureFin,
+        dureeMinutes:          body.dureeMinutes,
         renseignementClinique: body.renseignementClinique ?? null,
       },
       include: {
@@ -146,14 +166,14 @@ export class RdvsController {
   }
 
   @Patch(':id')
-  async modifierRdv(@Param('id') id: string, @Body() body: any) {
-    const data: any = {};
-    if (body.dateRdv) data.dateRdv = new Date(body.dateRdv);
-    if (body.heureDebut) data.heureDebut = body.heureDebut;
-    if (body.heureFin) data.heureFin = body.heureFin;
-    if (body.dureeMinutes) data.dureeMinutes = body.dureeMinutes;
-    if (body.salle) data.salle = body.salle;
-    if (body.statut) data.statut = body.statut as StatutRdv;
+  async modifierRdv(@Param('id') id: string, @Body() body: ModifierRdvDto) {
+    const data: Partial<ModifierRdvDto & { dateRdv: Date }> = {};
+    if (body.dateRdv)                   data.dateRdv          = new Date(body.dateRdv) as any;
+    if (body.heureDebut)                data.heureDebut        = body.heureDebut;
+    if (body.heureFin)                  data.heureFin          = body.heureFin;
+    if (body.dureeMinutes)              data.dureeMinutes      = body.dureeMinutes;
+    if (body.salle)                     data.salle             = body.salle;
+    if (body.statut)                    data.statut            = body.statut;
     if (body.renseignementClinique !== undefined) data.renseignementClinique = body.renseignementClinique;
     return this.prisma.eegRdv.update({
       where: { id },
@@ -163,7 +183,7 @@ export class RdvsController {
   }
 
   @Patch(':id/realiser')
-  async realiserRdv(@Param('id') id: string, @Body() body: any) {
+  async realiserRdv(@Param('id') id: string, @Body() body: RealiserRdvDto) {
     return this.prisma.eegRdv.update({
       where: { id },
       data: {
@@ -176,17 +196,89 @@ export class RdvsController {
 
   @Patch(':id/non-realise')
   async marquerNonRealise(@Param('id') id: string) {
-    return this.prisma.eegRdv.update({
+    // Charger le RDV avec sa demande liée pour déterminer si une répercussion est nécessaire
+    const rdv = await this.prisma.eegRdv.findUnique({
       where: { id },
-      data: { statut: StatutRdv.NON_REALISE },
+      include: { demande: true },
+    });
+    if (!rdv) throw new NotFoundException(`RDV ${id} introuvable`);
+
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Mettre à jour le statut du RDV
+      const rdvMaj = await tx.eegRdv.update({
+        where: { id },
+        data: { statut: StatutRdv.NON_REALISE },
+      });
+
+      // 2. Répercuter sur la demande liée (garde de non-régression)
+      if (rdv.demandeId && rdv.demande) {
+        const statutActuel = rdv.demande.statut as string;
+        const rangActuel = RdvsController.STATUTS_ORDONNES.indexOf(statutActuel);
+        const rangPlanifiee = RdvsController.STATUTS_ORDONNES.indexOf('PLANIFIEE');
+
+        if (rangActuel === rangPlanifiee) {
+          // La demande est encore à PLANIFIEE — on la repasse à VALIDEE pour replanification
+          await tx.eegDemande.update({
+            where: { id: rdv.demandeId },
+            data: { statut: 'VALIDEE', dateRDV: null },
+          });
+          this.logger.log(
+            `RDV ${id} marqué NON_REALISE — demande ${rdv.demandeId} repassée à VALIDEE`,
+          );
+        } else if (rangActuel > rangPlanifiee) {
+          // La demande est déjà plus avancée (EN_COURS+) — ne pas régresser, juste avertir
+          this.logger.warn(
+            `RDV ${id} marqué NON_REALISE mais demande ${rdv.demandeId} est à ${statutActuel} ` +
+            `(plus avancé que PLANIFIEE) — statut demande inchangé`,
+          );
+        }
+      }
+
+      return rdvMaj;
     });
   }
 
   @Patch(':id/annuler')
   async annulerRdv(@Param('id') id: string) {
-    return this.prisma.eegRdv.update({
+    // Charger le RDV avec sa demande liée pour déterminer si une répercussion est nécessaire
+    const rdv = await this.prisma.eegRdv.findUnique({
       where: { id },
-      data: { statut: StatutRdv.ANNULE },
+      include: { demande: true },
+    });
+    if (!rdv) throw new NotFoundException(`RDV ${id} introuvable`);
+
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Mettre à jour le statut du RDV
+      const rdvMaj = await tx.eegRdv.update({
+        where: { id },
+        data: { statut: StatutRdv.ANNULE },
+      });
+
+      // 2. Répercuter sur la demande liée (garde de non-régression)
+      if (rdv.demandeId && rdv.demande) {
+        const statutActuel = rdv.demande.statut as string;
+        const rangActuel = RdvsController.STATUTS_ORDONNES.indexOf(statutActuel);
+        const rangPlanifiee = RdvsController.STATUTS_ORDONNES.indexOf('PLANIFIEE');
+
+        if (rangActuel === rangPlanifiee) {
+          // La demande est encore à PLANIFIEE — on la repasse à VALIDEE pour replanification
+          await tx.eegDemande.update({
+            where: { id: rdv.demandeId },
+            data: { statut: 'VALIDEE', dateRDV: null },
+          });
+          this.logger.log(
+            `RDV ${id} annulé — demande ${rdv.demandeId} repassée à VALIDEE`,
+          );
+        } else if (rangActuel > rangPlanifiee) {
+          // La demande est déjà plus avancée (EN_COURS+) — ne pas régresser, juste avertir
+          this.logger.warn(
+            `RDV ${id} annulé mais demande ${rdv.demandeId} est à ${statutActuel} ` +
+            `(plus avancé que PLANIFIEE) — statut demande inchangé`,
+          );
+        }
+      }
+
+      return rdvMaj;
     });
   }
 
