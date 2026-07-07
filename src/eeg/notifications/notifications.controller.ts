@@ -1,10 +1,5 @@
-import {
-  Controller,
-  Get,
-  Patch,
-  Param,
-  Query,
-} from '@nestjs/common';
+import { Controller, Get, Patch, Param, Query } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PatientLookupService } from '../patients/patient-lookup.service';
 
@@ -15,7 +10,9 @@ export class NotificationsController {
     private readonly patientLookup: PatientLookupService,
   ) {}
 
-  private async attachPatientIfAny<T extends { patientId: string | null }>(notif: T) {
+  private async attachPatientIfAny<T extends { patientId: string | null }>(
+    notif: T,
+  ) {
     if (!notif.patientId) return { ...notif, patient: null };
     const patient = await this.patientLookup.getPatientInfo(notif.patientId);
     return { ...notif, patient };
@@ -25,7 +22,7 @@ export class NotificationsController {
   // GET /eeg/notifications?lu=false
   @Get()
   async getNotifications(@Query('lu') lu?: string) {
-    const where: any = {};
+    const where: Prisma.EegNotificationWhereInput = {};
 
     if (lu !== undefined) {
       where.lu = lu === 'true';

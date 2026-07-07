@@ -12,34 +12,6 @@ export class EegSchedulerService {
     private readonly patientLookup: PatientLookupService,
   ) {}
 
-  // ─── Relance ACK toutes les 5 min ──────────────────────────────────
-  @Cron(CronExpression.EVERY_5_MINUTES)
-  async relancerACKNonRecus() {
-    this.logger.log('⏰ Vérification des résultats sans ACK...');
-    const sansAck = await this.prisma.eegDemande.findMany({
-      where: { statut: 'RESULTAT_DISPONIBLE' },
-    });
-    for (const demande of sansAck) {
-      const dejaNotifie = await this.prisma.eegNotification.findFirst({
-        where: { demandeId: demande.id, lu: false, type: 'RAPPORT' },
-      });
-      if (!dejaNotifie) {
-        const patient = await this.patientLookup.getPatientInfo(demande.patientId);
-        await this.prisma.eegNotification.create({
-          data: {
-            niveau: demande.urgence,
-            type: 'RAPPORT',
-            titre: 'Relance — ACK en attente',
-            message: `Résultat de ${demande.numeroEEG} (${patient.nom} ${patient.prenom}) non accusé.`,
-            demandeId: demande.id,
-            patientId: demande.patientId,
-            assigneeUserId: demande.prescripteurId,
-          },
-        });
-      }
-    }
-  }
-
   // ─── Alerte EN_COURS non interprété > 24h ──────────────────────────
   @Cron(CronExpression.EVERY_HOUR)
   async alerterExamensNonInterpretes() {
@@ -55,7 +27,9 @@ export class EegSchedulerService {
         where: { demandeId: demande.id, type: 'ALERTE_URGENTE', lu: false },
       });
       if (!dejaNotifie) {
-        const patient = await this.patientLookup.getPatientInfo(demande.patientId);
+        const patient = await this.patientLookup.getPatientInfo(
+          demande.patientId,
+        );
         await this.prisma.eegNotification.create({
           data: {
             niveau: 'URGENTE',
@@ -87,7 +61,9 @@ export class EegSchedulerService {
         where: { demandeId: demande.id, type: 'ALERTE_CRITIQUE', lu: false },
       });
       if (!dejaNotifie) {
-        const patient = await this.patientLookup.getPatientInfo(demande.patientId);
+        const patient = await this.patientLookup.getPatientInfo(
+          demande.patientId,
+        );
         await this.prisma.eegNotification.create({
           data: {
             niveau: 'STAT',

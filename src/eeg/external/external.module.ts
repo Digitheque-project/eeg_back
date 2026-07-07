@@ -1,15 +1,21 @@
 import { Module } from '@nestjs/common';
 import { NotificationExternalService } from './notification-external.service';
-import { ExternalPrescriptionService } from './external-prescription.service';
-import { ExternalPrescriptionController } from './external-prescription.controller';
+import { PrescriptionClientService } from './prescription-client.service';
 import { PatientLookupService } from '../patients/patient-lookup.service';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { CommonModule } from '../../common/common.module';
 
 @Module({
   imports: [PrismaModule, CommonModule],
-  providers: [NotificationExternalService, ExternalPrescriptionService, PatientLookupService],
-  controllers: [ExternalPrescriptionController],
-  exports: [NotificationExternalService, ExternalPrescriptionService, PatientLookupService],
+  providers: [
+    NotificationExternalService,
+    PrescriptionClientService,
+    PatientLookupService,
+  ],
+  exports: [
+    NotificationExternalService,
+    PrescriptionClientService,
+    PatientLookupService,
+  ],
 })
 export class ExternalModule {}

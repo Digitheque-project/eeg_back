@@ -9,12 +9,9 @@ datasource db {
 
 enum StatutDemande {
   CREEE
-  VALIDEE
   PLANIFIEE
   EN_COURS
-  EN_INTERPRETATION
   RESULTAT_DISPONIBLE
-  ACK_RECU
   ANNULEE
 }
 
@@ -117,22 +114,22 @@ model Utilisateur {
 }
 
 model EegDemande {
-  id                String        @id @default(uuid())
-  numeroEEG         String        @unique
-  patientId         String
-  prescripteurId    String
-  technicienId      String?
-  typeEEG           TypeEEG
-  urgence           NiveauUrgence
-  motifPrescription String
-  statut            StatutDemande @default(CREEE)
-  episodeSoinsId    String
-  dateCreation      DateTime      @default(now())
-  dateRDV           DateTime?
-  dateRealisation   DateTime?
-  dateValidation    DateTime?
-  dateAck           DateTime?
-  motifAnnulation   String?
+  id                   String        @id @default(uuid())
+  numeroEEG            String        @unique
+  patientId            String
+  prescripteurId       String
+  technicienId         String?
+  typeEEG              TypeEEG
+  urgence              NiveauUrgence
+  motifPrescription    String
+  statut               StatutDemande @default(CREEE)
+  episodeSoinsId       String
+  prescriptionSourceId String?       @unique
+  dateCreation         DateTime      @default(now())
+  dateRDV              DateTime?
+  dateRealisation      DateTime?
+  dateValidation       DateTime?
+  motifAnnulation      String?
 
   prescripteur  Utilisateur       @relation("prescripteur", fields: [prescripteurId], references: [id])
   resultat      EegResultat?
@@ -168,23 +165,43 @@ model EegRdv {
   @@map("eeg_rdv")
 }
 
+// Compte rendu EEG — champs alignés sur le formulaire papier réel du CHU
+// Andrainjato (service Neurologie). Seule cette section (CLINIQUE,
+// INTERPRETATION, CONCLUSION, CONDUITE A TENIR) est saisie manuellement ;
+// le reste du document (identité patient, prescripteur, personnel, dates)
+// est déjà connu ailleurs dans le système et rempli automatiquement.
 model EegResultat {
-  id                     String    @id @default(uuid())
-  demandeId              String    @unique
-  fichierImagePath       String?
-  nomFichierImage        String?
-  dureeEnregistrement    Int?
-  rythmesDeFond          String?
-  anomaliesDetectees     String?
-  conclusionDiagnostique String?
-  compteRendu            String?
-  medecinValidateurId    String?
-  dateValidation         DateTime?
-  estImmutable           Boolean   @default(false)
-  estCritique            Boolean   @default(false)
-  version                Int       @default(0)
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
+  id                  String    @id @default(uuid())
+  demandeId           String    @unique
+  fichierImagePath    String?
+  nomFichierImage     String?
+  dureeEnregistrement Int?
+
+  // CLINIQUE
+  aeActuel          String?
+  age1ereCrise      String?
+  dpm               String?
+  typeCrises        String?
+  autresRc          String?
+  dateDerniereCrise String?
+
+  // INTERPRETATION
+  activiteDeFond    String?
+  anomaliesAuRepos  String?
+  testActivationHpn String?
+  testActivationSli String?
+
+  // CONCLUSION / CONDUITE A TENIR
+  conclusion     String?
+  conduiteATenir String?
+
+  medecinValidateurId String?
+  dateValidation      DateTime?
+  estImmutable        Boolean   @default(false)
+  estCritique         Boolean   @default(false)
+  version             Int       @default(0)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   demande           EegDemande         @relation(fields: [demandeId], references: [id])
   medecinValidateur Utilisateur?       @relation(fields: [medecinValidateurId], references: [id])
@@ -194,19 +211,13 @@ model EegResultat {
 }
 
 model EegRectification {
-  id                   String   @id @default(uuid())
-  resultatId           String
-  auteurId             String
-  motif                String
-  ancienCompteRendu    String?
-  nouveauCompteRendu   String?
-  ancienRythmesDeFond  String?
-  nouveauRythmesDeFond String?
-  ancienAnomalies      String?
-  nouveauAnomalies     String?
-  ancienneConclusion   String?
-  nouvelleConclusion   String?
-  dateRectification    DateTime @default(now())
+  id                String   @id @default(uuid())
+  resultatId        String
+  auteurId          String
+  motif             String
+  ancienneVersion   Json
+  nouvelleVersion   Json
+  dateRectification DateTime @default(now())
 
   resultat EegResultat @relation(fields: [resultatId], references: [id])
   auteur   Utilisateur @relation(fields: [auteurId], references: [id])

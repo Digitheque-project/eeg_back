@@ -25,13 +25,10 @@ export class RdvsController {
   // Aucune constante centralisée n'existe dans le projet — cette définition
   // doit être déplacée dans un fichier partagé lors du nettoyage Phase 5.
   private static readonly STATUTS_ORDONNES: string[] = [
-    'CREEE',           // 1
-    'VALIDEE',         // 2
-    'PLANIFIEE',       // 3
-    'EN_COURS',        // 4
-    'EN_INTERPRETATION', // 5
-    'RESULTAT_DISPONIBLE', // 6
-    'ACK_RECU',        // 7
+    'CREEE', // 1
+    'PLANIFIEE', // 2
+    'EN_COURS', // 3
+    'RESULTAT_DISPONIBLE', // 4
     // ANNULEE est un état terminal hors chaîne principale
   ];
 
@@ -59,7 +56,15 @@ export class RdvsController {
       where,
       include: {
         prescripteur: { select: { nom: true, role: true } },
-        demande: { select: { numeroEEG: true, statut: true, urgence: true, typeEEG: true, motifPrescription: true } },
+        demande: {
+          select: {
+            numeroEEG: true,
+            statut: true,
+            urgence: true,
+            typeEEG: true,
+            motifPrescription: true,
+          },
+        },
       },
       orderBy: { dateRdv: 'asc' },
     });
@@ -79,7 +84,15 @@ export class RdvsController {
       where: { dateRdv: { gte: debutSemaine, lte: finSemaine } },
       include: {
         prescripteur: { select: { nom: true, role: true } },
-        demande: { select: { numeroEEG: true, statut: true, urgence: true, typeEEG: true, motifPrescription: true } },
+        demande: {
+          select: {
+            numeroEEG: true,
+            statut: true,
+            urgence: true,
+            typeEEG: true,
+            motifPrescription: true,
+          },
+        },
       },
       orderBy: { dateRdv: 'asc' },
     });
@@ -96,7 +109,14 @@ export class RdvsController {
       where: { dateRdv: { gte: debut, lte: fin } },
       include: {
         prescripteur: { select: { nom: true, role: true } },
-        demande: { select: { numeroEEG: true, statut: true, urgence: true, typeEEG: true } },
+        demande: {
+          select: {
+            numeroEEG: true,
+            statut: true,
+            urgence: true,
+            typeEEG: true,
+          },
+        },
       },
       orderBy: { heureDebut: 'asc' },
     });
@@ -121,16 +141,16 @@ export class RdvsController {
   async creerRdv(@Body() body: CreateRdvDto) {
     const rdv = await this.prisma.eegRdv.create({
       data: {
-        patientId:             body.patientId,
-        prescripteurId:        body.prescripteurId,
-        demandeId:             body.demandeId ?? null,
-        typeEEG:               body.typeEEG,
-        salle:                 body.salle,
-        priorite:              body.priorite,
-        dateRdv:               new Date(body.dateRdv),
-        heureDebut:            body.heureDebut,
-        heureFin:              body.heureFin,
-        dureeMinutes:          body.dureeMinutes,
+        patientId: body.patientId,
+        prescripteurId: body.prescripteurId,
+        demandeId: body.demandeId ?? null,
+        typeEEG: body.typeEEG,
+        salle: body.salle,
+        priorite: body.priorite,
+        dateRdv: new Date(body.dateRdv),
+        heureDebut: body.heureDebut,
+        heureFin: body.heureFin,
+        dureeMinutes: body.dureeMinutes,
         renseignementClinique: body.renseignementClinique ?? null,
       },
       include: {
@@ -143,13 +163,14 @@ export class RdvsController {
   @Patch(':id')
   async modifierRdv(@Param('id') id: string, @Body() body: ModifierRdvDto) {
     const data: Partial<ModifierRdvDto & { dateRdv: Date }> = {};
-    if (body.dateRdv)                   data.dateRdv          = new Date(body.dateRdv) as any;
-    if (body.heureDebut)                data.heureDebut        = body.heureDebut;
-    if (body.heureFin)                  data.heureFin          = body.heureFin;
-    if (body.dureeMinutes)              data.dureeMinutes      = body.dureeMinutes;
-    if (body.salle)                     data.salle             = body.salle;
-    if (body.statut)                    data.statut            = body.statut;
-    if (body.renseignementClinique !== undefined) data.renseignementClinique = body.renseignementClinique;
+    if (body.dateRdv) data.dateRdv = new Date(body.dateRdv) as any;
+    if (body.heureDebut) data.heureDebut = body.heureDebut;
+    if (body.heureFin) data.heureFin = body.heureFin;
+    if (body.dureeMinutes) data.dureeMinutes = body.dureeMinutes;
+    if (body.salle) data.salle = body.salle;
+    if (body.statut) data.statut = body.statut;
+    if (body.renseignementClinique !== undefined)
+      data.renseignementClinique = body.renseignementClinique;
     const rdv = await this.prisma.eegRdv.update({
       where: { id },
       data,
@@ -189,23 +210,25 @@ export class RdvsController {
       // 2. Répercuter sur la demande liée (garde de non-régression)
       if (rdv.demandeId && rdv.demande) {
         const statutActuel = rdv.demande.statut as string;
-        const rangActuel = RdvsController.STATUTS_ORDONNES.indexOf(statutActuel);
-        const rangPlanifiee = RdvsController.STATUTS_ORDONNES.indexOf('PLANIFIEE');
+        const rangActuel =
+          RdvsController.STATUTS_ORDONNES.indexOf(statutActuel);
+        const rangPlanifiee =
+          RdvsController.STATUTS_ORDONNES.indexOf('PLANIFIEE');
 
         if (rangActuel === rangPlanifiee) {
-          // La demande est encore à PLANIFIEE — on la repasse à VALIDEE pour replanification
+          // La demande est encore à PLANIFIEE — on la repasse à CREEE pour que le technicien replanifie
           await tx.eegDemande.update({
             where: { id: rdv.demandeId },
-            data: { statut: 'VALIDEE', dateRDV: null },
+            data: { statut: 'CREEE', dateRDV: null },
           });
           this.logger.log(
-            `RDV ${id} marqué NON_REALISE — demande ${rdv.demandeId} repassée à VALIDEE`,
+            `RDV ${id} marqué NON_REALISE — demande ${rdv.demandeId} repassée à CREEE`,
           );
         } else if (rangActuel > rangPlanifiee) {
           // La demande est déjà plus avancée (EN_COURS+) — ne pas régresser, juste avertir
           this.logger.warn(
             `RDV ${id} marqué NON_REALISE mais demande ${rdv.demandeId} est à ${statutActuel} ` +
-            `(plus avancé que PLANIFIEE) — statut demande inchangé`,
+              `(plus avancé que PLANIFIEE) — statut demande inchangé`,
           );
         }
       }
@@ -233,23 +256,25 @@ export class RdvsController {
       // 2. Répercuter sur la demande liée (garde de non-régression)
       if (rdv.demandeId && rdv.demande) {
         const statutActuel = rdv.demande.statut as string;
-        const rangActuel = RdvsController.STATUTS_ORDONNES.indexOf(statutActuel);
-        const rangPlanifiee = RdvsController.STATUTS_ORDONNES.indexOf('PLANIFIEE');
+        const rangActuel =
+          RdvsController.STATUTS_ORDONNES.indexOf(statutActuel);
+        const rangPlanifiee =
+          RdvsController.STATUTS_ORDONNES.indexOf('PLANIFIEE');
 
         if (rangActuel === rangPlanifiee) {
-          // La demande est encore à PLANIFIEE — on la repasse à VALIDEE pour replanification
+          // La demande est encore à PLANIFIEE — on la repasse à CREEE pour que le technicien replanifie
           await tx.eegDemande.update({
             where: { id: rdv.demandeId },
-            data: { statut: 'VALIDEE', dateRDV: null },
+            data: { statut: 'CREEE', dateRDV: null },
           });
           this.logger.log(
-            `RDV ${id} annulé — demande ${rdv.demandeId} repassée à VALIDEE`,
+            `RDV ${id} annulé — demande ${rdv.demandeId} repassée à CREEE`,
           );
         } else if (rangActuel > rangPlanifiee) {
           // La demande est déjà plus avancée (EN_COURS+) — ne pas régresser, juste avertir
           this.logger.warn(
             `RDV ${id} annulé mais demande ${rdv.demandeId} est à ${statutActuel} ` +
-            `(plus avancé que PLANIFIEE) — statut demande inchangé`,
+              `(plus avancé que PLANIFIEE) — statut demande inchangé`,
           );
         }
       }

@@ -1,5 +1,6 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiQuery, ApiResponse } from '@nestjs/swagger';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PatientLookupService } from '../patients/patient-lookup.service';
 
@@ -14,17 +15,33 @@ export class ArchivesController {
   @Get()
   @ApiOperation({
     summary: 'Archives EEG — résultats validés',
-    description: 'Retourne uniquement les résultats validés (estImmutable=true). Filtrable par patient, date, type EEG, conclusion, numéro EEG.',
+    description:
+      'Retourne uniquement les résultats validés (estImmutable=true). Filtrable par patient, date, type EEG, conclusion, numéro EEG.',
   })
   @ApiQuery({ name: 'patientId', required: false })
   @ApiQuery({ name: 'numeroEEG', required: false })
-  @ApiQuery({ name: 'typeEEG', required: false, enum: ['STANDARD', 'SOMMEIL', 'AMBULATOIRE', 'VIDEO_EEG'] })
+  @ApiQuery({
+    name: 'typeEEG',
+    required: false,
+    enum: ['STANDARD', 'SOMMEIL', 'AMBULATOIRE', 'VIDEO_EEG'],
+  })
   @ApiQuery({ name: 'dateDebut', required: false, description: 'YYYY-MM-DD' })
   @ApiQuery({ name: 'dateFin', required: false, description: 'YYYY-MM-DD' })
-  @ApiQuery({ name: 'conclusion', required: false, description: 'Recherche texte libre dans conclusionDiagnostique' })
+  @ApiQuery({
+    name: 'conclusion',
+    required: false,
+    description: 'Recherche texte libre dans conclusion',
+  })
   @ApiQuery({ name: 'page', required: false, description: 'Page (défaut 1)' })
-  @ApiQuery({ name: 'limit', required: false, description: 'Résultats par page (défaut 20, max 100)' })
-  @ApiResponse({ status: 200, description: 'Liste paginée des résultats archivés' })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    description: 'Résultats par page (défaut 20, max 100)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Liste paginée des résultats archivés',
+  })
   async getArchives(
     @Query('patientId') patientId?: string,
     @Query('numeroEEG') numeroEEG?: string,
@@ -57,7 +74,7 @@ export class ArchivesController {
       }
     }
     if (conclusion) {
-      where.conclusionDiagnostique = { contains: conclusion };
+      where.conclusion = { contains: conclusion };
     }
 
     const [total, resultats] = await Promise.all([
@@ -72,7 +89,6 @@ export class ArchivesController {
               urgence: true,
               statut: true,
               dateCreation: true,
-              dateAck: true,
               patientId: true,
               prescripteur: { select: { nom: true, prenom: true, role: true } },
             },
@@ -94,10 +110,87 @@ export class ArchivesController {
 
     const data = await Promise.all(
       resultats.map(async (r) => {
-        const patient = await this.patientLookup.getPatientInfo(r.demande.patientId);
+        const patient = await this.patientLookup.getPatientInfo(
+          r.demande.patientId,
+        );
         return { ...r, demande: { ...r.demande, patient } };
       }),
     );
+
+    return {
+      data,
+      pagination: {
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum),
+      },
+    };
+  }
+
+  @Get('annulees')
+  @ApiOperation({
+    summary: 'Archives EEG — demandes refusées ou annulées',
+    description:
+      "Retourne les demandes au statut ANNULEE (refus technicien ou annulation), pour qu'elles n'encombrent plus le fil de travail tout en restant consultables.",
+  })
+  @ApiQuery({ name: 'patientId', required: false })
+  @ApiQuery({ name: 'numeroEEG', required: false })
+  @ApiQuery({
+    name: 'typeEEG',
+    required: false,
+    enum: ['STANDARD', 'SOMMEIL', 'AMBULATOIRE', 'VIDEO_EEG'],
+  })
+  @ApiQuery({ name: 'dateDebut', required: false, description: 'YYYY-MM-DD' })
+  @ApiQuery({ name: 'dateFin', required: false, description: 'YYYY-MM-DD' })
+  @ApiQuery({ name: 'page', required: false, description: 'Page (défaut 1)' })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    description: 'Résultats par page (défaut 20, max 100)',
+  })
+  async getArchivesAnnulees(
+    @Query('patientId') patientId?: string,
+    @Query('numeroEEG') numeroEEG?: string,
+    @Query('typeEEG') typeEEG?: string,
+    @Query('dateDebut') dateDebut?: string,
+    @Query('dateFin') dateFin?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const pageNum = Math.max(1, parseInt(page ?? '1', 10));
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit ?? '20', 10)));
+    const skip = (pageNum - 1) * limitNum;
+
+    const where: Prisma.EegDemandeWhereInput = { statut: 'ANNULEE' };
+    if (patientId) where.patientId = patientId;
+    if (typeEEG)
+      where.typeEEG = typeEEG as Prisma.EegDemandeWhereInput['typeEEG'];
+    if (numeroEEG) where.numeroEEG = { contains: numeroEEG };
+    if (dateDebut || dateFin) {
+      where.dateCreation = {};
+      if (dateDebut) where.dateCreation.gte = new Date(dateDebut);
+      if (dateFin) {
+        const fin = new Date(dateFin);
+        fin.setHours(23, 59, 59, 999);
+        where.dateCreation.lte = fin;
+      }
+    }
+
+    const [total, demandes] = await Promise.all([
+      this.prisma.eegDemande.count({ where }),
+      this.prisma.eegDemande.findMany({
+        where,
+        include: {
+          prescripteur: { select: { nom: true, prenom: true, role: true } },
+        },
+        orderBy: { dateCreation: 'desc' },
+        skip,
+        take: limitNum,
+      }),
+    ]);
+
+    const data = await this.patientLookup.attachPatientInfoToMany(demandes);
 
     return {
       data,

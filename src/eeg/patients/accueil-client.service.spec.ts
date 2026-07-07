@@ -48,7 +48,9 @@ describe('AccueilClientService', () => {
         config: {} as any,
       };
 
-      jest.spyOn(httpService, 'get').mockReturnValue(of(mockResponse));
+      const getSpy = jest
+        .spyOn(httpService, 'get')
+        .mockReturnValue(of(mockResponse));
 
       const result = await service.getPatientByExternalId('CHU-2026-00001');
 
@@ -59,7 +61,7 @@ describe('AccueilClientService', () => {
         sexe: 'M',
       });
       expect(typeof result?.age).toBe('number');
-      expect(httpService.get).toHaveBeenCalledWith(
+      expect(getSpy).toHaveBeenCalledWith(
         expect.stringContaining('/patients/CHU-2026-00001'),
         expect.objectContaining({
           params: { chuId: expect.any(String) },
@@ -74,9 +76,7 @@ describe('AccueilClientService', () => {
         message: 'Not Found',
       };
 
-      jest.spyOn(httpService, 'get').mockReturnValue(
-        throwError(() => error),
-      );
+      jest.spyOn(httpService, 'get').mockReturnValue(throwError(() => error));
 
       const result = await service.getPatientByExternalId('CHU-2026-00001');
 
@@ -88,9 +88,7 @@ describe('AccueilClientService', () => {
         message: 'Network Error',
       };
 
-      jest.spyOn(httpService, 'get').mockReturnValue(
-        throwError(() => error),
-      );
+      jest.spyOn(httpService, 'get').mockReturnValue(throwError(() => error));
 
       const result = await service.getPatientByExternalId('CHU-2026-00001');
 
@@ -102,9 +100,7 @@ describe('AccueilClientService', () => {
         message: 'timeout of 5000ms exceeded',
       };
 
-      jest.spyOn(httpService, 'get').mockReturnValue(
-        throwError(() => error),
-      );
+      jest.spyOn(httpService, 'get').mockReturnValue(throwError(() => error));
 
       const result = await service.getPatientByExternalId('CHU-2026-00001');
 
@@ -113,7 +109,11 @@ describe('AccueilClientService', () => {
 
     it('should map FEMALE to F and compute age from dateNaissance', async () => {
       const mockResponse: AxiosResponse = {
-        data: { ...mockRawPatient, sexe: 'FEMALE', dateNaissance: '2000-01-01' },
+        data: {
+          ...mockRawPatient,
+          sexe: 'FEMALE',
+          dateNaissance: '2000-01-01',
+        },
         status: 200,
         statusText: 'OK',
         headers: {},
@@ -134,7 +134,13 @@ describe('AccueilClientService', () => {
       const mockResponse: AxiosResponse = {
         data: [
           mockRawPatient,
-          { id: 'CHU-2026-00002', nom: 'Smith', prenom: 'Anna', sexe: 'FEMALE', dateNaissance: '1990-05-05' },
+          {
+            id: 'CHU-2026-00002',
+            nom: 'Smith',
+            prenom: 'Anna',
+            sexe: 'FEMALE',
+            dateNaissance: '1990-05-05',
+          },
         ],
         status: 200,
         statusText: 'OK',
@@ -151,9 +157,9 @@ describe('AccueilClientService', () => {
     });
 
     it('should return an empty array on error', async () => {
-      jest.spyOn(httpService, 'get').mockReturnValue(
-        throwError(() => new Error('Network Error')),
-      );
+      jest
+        .spyOn(httpService, 'get')
+        .mockReturnValue(throwError(() => new Error('Network Error')));
 
       const result = await service.listPatients();
 
@@ -171,11 +177,16 @@ describe('AccueilClientService', () => {
         config: {} as any,
       };
 
-      jest.spyOn(httpService, 'patch').mockReturnValue(of(mockResponse));
+      const patchSpy = jest
+        .spyOn(httpService, 'patch')
+        .mockReturnValue(of(mockResponse));
 
-      const result = await service.updatePatient('CHU-2026-00001', { nom: 'Updated', sexe: 'M' });
+      const result = await service.updatePatient('CHU-2026-00001', {
+        nom: 'Updated',
+        sexe: 'M',
+      });
 
-      expect(httpService.patch).toHaveBeenCalledWith(
+      expect(patchSpy).toHaveBeenCalledWith(
         expect.stringContaining('/patients/CHU-2026-00001'),
         expect.objectContaining({ nom: 'Updated', sexe: 'MALE' }),
         expect.any(Object),
@@ -184,11 +195,13 @@ describe('AccueilClientService', () => {
     });
 
     it('should return null on error', async () => {
-      jest.spyOn(httpService, 'patch').mockReturnValue(
-        throwError(() => new Error('Network Error')),
-      );
+      jest
+        .spyOn(httpService, 'patch')
+        .mockReturnValue(throwError(() => new Error('Network Error')));
 
-      const result = await service.updatePatient('CHU-2026-00001', { nom: 'X' });
+      const result = await service.updatePatient('CHU-2026-00001', {
+        nom: 'X',
+      });
 
       expect(result).toBeNull();
     });

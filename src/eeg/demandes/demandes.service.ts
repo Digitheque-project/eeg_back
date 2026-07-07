@@ -1,7 +1,18 @@
-import { NotificationExternalService } from "../external/notification-external.service";
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { NotificationExternalService } from '../external/notification-external.service';
+import {
+  PrescriptionClientService,
+  PrescriptionEegDto,
+} from '../external/prescription-client.service';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PatientLookupService } from '../patients/patient-lookup.service';
+import { getErrorMessage } from '../../common/utils/error.util';
+import { PlanifierRdvDto } from './dto/planifier-rdv.dto';
+import { ArchiverResultatDto } from './dto/archiver-resultat.dto';
 
 @Injectable()
 export class DemandesService {
@@ -9,72 +20,169 @@ export class DemandesService {
     private readonly prisma: PrismaService,
     private readonly notificationService: NotificationExternalService,
     private readonly patientLookup: PatientLookupService,
+    private readonly prescriptionClient: PrescriptionClientService,
   ) {}
 
-  async getWorklist(role: string) {
-    switch (role) {
-      case 'MEDECIN_SERVICE':
-        return {
-          aValider: await this.patientLookup.attachPatientInfoToMany(await this.prisma.eegDemande.findMany({
-            where: { statut: 'CREEE' },
-            include: { prescripteur: true },
-            orderBy: { dateCreation: 'asc' },
-          })),
-          aInterpreter: await this.patientLookup.attachPatientInfoToMany(await this.prisma.eegDemande.findMany({
-            where: { statut: 'EN_COURS' },
-            include: { prescripteur: true, resultat: true },
-            orderBy: { dateRealisation: 'asc' },
-          })),
-        };
-      case 'TECHNICIEN':
-        return {
-          statUrgents: await this.patientLookup.attachPatientInfoToMany(await this.prisma.eegDemande.findMany({
-            where: { statut: 'CREEE', urgence: 'STAT' },
-            orderBy: { dateCreation: 'asc' },
-          })),
-          rdvDuJour: await this.patientLookup.attachPatientInfoToMany(await this.prisma.eegDemande.findMany({
-            where: { statut: 'PLANIFIEE' },
-            include: { rdv: true },
-            orderBy: { dateRDV: 'asc' },
-          })),
-        };
-      case 'CHEF_SERVICE':
-        return {
-          aValider: await this.patientLookup.attachPatientInfoToMany(await this.prisma.eegDemande.findMany({
-            where: { statut: 'CREEE' },
-            include: { prescripteur: true },
-            orderBy: [{ urgence: 'asc' }, { dateCreation: 'asc' }],
-          })),
-          aPlanifier: await this.patientLookup.attachPatientInfoToMany(await this.prisma.eegDemande.findMany({
-            where: { statut: 'VALIDEE' },
-            orderBy: { dateCreation: 'asc' },
-          })),
-          aValiderCR: await this.patientLookup.attachPatientInfoToMany(await this.prisma.eegDemande.findMany({
-            where: { statut: 'EN_INTERPRETATION' },
-            include: { resultat: true },
-            orderBy: { dateCreation: 'asc' },
-          })),
-        };
-      case 'MAJOR_SERVICE':
-        return {
-          toutes: await this.patientLookup.attachPatientInfoToMany(await this.prisma.eegDemande.findMany({
-            include: { prescripteur: true, resultat: true, rdv: true },
-            orderBy: { dateCreation: 'desc' },
-            take: 50,
-          })),
-        };
-      default:
-        return { message: 'Rôle non reconnu' };
+  /**
+   * Une prescription CREEE tant qu'aucun technicien n'a agi dessus n'est
+   * jamais stockée localement : elle est représentée à la volée depuis le
+   * service Prescription (source de vérité). Elle apparaît/disparaît donc
+   * immédiatement selon ce que ce service renvoie.
+   */
+  private buildVirtualDemande(p: PrescriptionEegDto) {
+    return {
+      id: p.id,
+      numeroEEG: `PRESC-${p.id.slice(0, 8).toUpperCase()}`,
+      patientId: p.patientId,
+      prescripteurId: p.prescripteurId,
+      technicienId: null as string | null,
+      typeEEG: p.typeEEG,
+      urgence: p.urgence ?? 'NORMALE',
+      motifPrescription: p.renseignements,
+      statut: 'CREEE' as const,
+      episodeSoinsId: p.chuId ?? '',
+      prescriptionSourceId: p.id,
+      dateCreation: p.createdAt ? new Date(p.createdAt) : new Date(),
+      dateRDV: null as Date | null,
+      dateRealisation: null as Date | null,
+      dateValidation: null as Date | null,
+      motifAnnulation: null as string | null,
+    };
+  }
+
+  /**
+   * Crée l'enregistrement local au moment (et seulement au moment) où un
+   * technicien agit sur une prescription encore virtuelle. Idempotent :
+   * si un doublon est créé en concurrence, on retombe sur celui déjà promu.
+   */
+  private async promoteToLocal(p: PrescriptionEegDto) {
+    await this.prisma.utilisateur.upsert({
+      where: { id: p.prescripteurId },
+      update: {},
+      create: {
+        id: p.prescripteurId,
+        nom: 'Prescripteur',
+        prenom: 'Externe',
+        email: `prescripteur-${p.prescripteurId}@chu.local`,
+        password: 'EXTERNAL',
+        role: 'TECHNICIEN',
+        actif: true,
+      },
+    });
+
+    try {
+      return await this.prisma.eegDemande.create({
+        data: {
+          patientId: p.patientId,
+          prescripteurId: p.prescripteurId,
+          typeEEG: p.typeEEG,
+          urgence: p.urgence || 'NORMALE',
+          motifPrescription: p.renseignements,
+          episodeSoinsId: p.chuId || `EXTERNAL-${Date.now()}`,
+          numeroEEG: `EEG-${Date.now()}`,
+          prescriptionSourceId: p.id,
+        },
+        include: { rdv: true },
+      });
+    } catch {
+      const existant = await this.prisma.eegDemande.findUnique({
+        where: { prescriptionSourceId: p.id },
+        include: { rdv: true },
+      });
+      if (existant) return existant;
+      throw new BadRequestException(
+        'Échec de la prise en charge de la prescription',
+      );
     }
   }
 
+  /**
+   * Répercute un changement de statut EEG sur la prescription source, pour
+   * que le prescripteur voie l'évolution (et le motif de refus/annulation)
+   * dans le service Prescription. Fire-and-forget — un échec de sync ne doit
+   * jamais bloquer le workflow EEG local.
+   */
+  private syncStatutToSource(
+    prescriptionSourceId: string | null,
+    statut: string,
+    motif?: string,
+  ) {
+    if (!prescriptionSourceId) return;
+    void this.prescriptionClient.updateStatut(
+      prescriptionSourceId,
+      statut,
+      motif,
+    );
+  }
+
+  /**
+   * Résout un id vers une demande locale (déjà promue) ou, s'il s'agit d'un
+   * id de prescription encore virtuelle, la promeut à la demande.
+   */
+  private async resolveOrPromote(id: string) {
+    const local = await this.prisma.eegDemande.findFirst({
+      where: { OR: [{ id }, { prescriptionSourceId: id }] },
+      include: { rdv: true },
+    });
+    if (local) return local;
+
+    const prescription =
+      await this.prescriptionClient.findEegPrescriptionById(id);
+    if (!prescription) throw new NotFoundException(`Demande ${id} introuvable`);
+    return this.promoteToLocal(prescription);
+  }
+
+  async getWorklist(role: string) {
+    if (!['TECHNICIEN', 'CHEF_SERVICE', 'MAJOR_SERVICE'].includes(role)) {
+      return { message: 'Rôle non reconnu' };
+    }
+
+    const [locales, prescriptions] = await Promise.all([
+      this.prisma.eegDemande.findMany({
+        include: { prescripteur: true, resultat: true, rdv: true },
+        orderBy: { dateCreation: 'desc' },
+      }),
+      this.prescriptionClient.listEegPrescriptions(),
+    ]);
+
+    const sourceIdsConnus = new Set(
+      locales
+        .map((d) => d.prescriptionSourceId)
+        .filter((v): v is string => !!v),
+    );
+    const virtuelles = prescriptions
+      .filter((p) => !sourceIdsConnus.has(p.id))
+      .map((p) => this.buildVirtualDemande(p));
+
+    // Un dossier clos (résultat archivé ou demande annulée/refusée) n'a plus
+    // sa place dans le fil de travail — il reste consultable depuis la page
+    // Archives. On l'exclut ici (et non de la requête ci-dessus) pour que la
+    // déduplication par prescriptionSourceId reste correcte.
+    const localesActives = locales.filter(
+      (d) => !['RESULTAT_DISPONIBLE', 'ANNULEE'].includes(d.statut),
+    );
+
+    const toutes = [...localesActives, ...virtuelles].sort(
+      (a, b) =>
+        new Date(b.dateCreation).getTime() - new Date(a.dateCreation).getTime(),
+    );
+
+    return { toutes: await this.patientLookup.attachPatientInfoToMany(toutes) };
+  }
+
   async getDemandeById(id: string) {
-    const d = await this.prisma.eegDemande.findUnique({
-      where: { id },
+    const local = await this.prisma.eegDemande.findFirst({
+      where: { OR: [{ id }, { prescriptionSourceId: id }] },
       include: { prescripteur: true, resultat: true, rdv: true },
     });
-    if (!d) throw new NotFoundException(`Demande ${id} introuvable`);
-    return this.patientLookup.attachPatientInfo(d);
+    if (local) return this.patientLookup.attachPatientInfo(local);
+
+    const prescription =
+      await this.prescriptionClient.findEegPrescriptionById(id);
+    if (!prescription) throw new NotFoundException(`Demande ${id} introuvable`);
+    return this.patientLookup.attachPatientInfo(
+      this.buildVirtualDemande(prescription),
+    );
   }
 
   async getDemandesByPatient(patientId: string) {
@@ -86,69 +194,78 @@ export class DemandesService {
     return this.patientLookup.attachPatientInfoToMany(demandes);
   }
 
-  async validerDemande(id: string, medecinId: string) {
-    const d = await this.getDemandeById(id);
-    if (d.statut !== 'CREEE') throw new BadRequestException(`Statut invalide: ${d.statut}`);
-    return this.prisma.eegDemande.update({ where: { id }, data: { statut: 'VALIDEE' } });
+  async refuserDemande(id: string, motif: string, technicienId: string) {
+    if (!motif?.trim()) throw new BadRequestException('Motif obligatoire');
+    const d = await this.resolveOrPromote(id);
+    if (d.statut !== 'CREEE')
+      throw new BadRequestException(`Statut invalide: ${d.statut}`);
+    const demandeMaj = await this.prisma.eegDemande.update({
+      where: { id: d.id },
+      data: { statut: 'ANNULEE', motifAnnulation: motif, technicienId },
+    });
+    this.syncStatutToSource(d.prescriptionSourceId, 'ANNULEE', motif);
+    return demandeMaj;
   }
 
-  async refuserDemande(id: string, motif: string, medecinId: string) {
+  async annulerDemande(id: string, motif: string) {
     if (!motif?.trim()) throw new BadRequestException('Motif obligatoire');
-    const d = await this.getDemandeById(id);
-    if (d.statut !== 'CREEE') throw new BadRequestException(`Statut invalide: ${d.statut}`);
-    return this.prisma.eegDemande.update({ where: { id }, data: { statut: 'ANNULEE', motifAnnulation: motif } });
-  }
-
-  async annulerDemande(id: string, motif: string, userId: string) {
-    if (!motif?.trim()) throw new BadRequestException('Motif obligatoire');
-    const d = await this.getDemandeById(id);
-    if (['ANNULEE', 'ACK_RECU', 'RESULTAT_DISPONIBLE'].includes(d.statut)) {
-      throw new BadRequestException(`Impossible d'annuler une demande ${d.statut}`);
+    const d = await this.resolveOrPromote(id);
+    if (['ANNULEE', 'RESULTAT_DISPONIBLE'].includes(d.statut)) {
+      throw new BadRequestException(
+        `Impossible d'annuler une demande ${d.statut}`,
+      );
     }
-    return this.prisma.eegDemande.update({ where: { id }, data: { statut: 'ANNULEE', motifAnnulation: motif } });
+    const demandeMaj = await this.prisma.eegDemande.update({
+      where: { id: d.id },
+      data: { statut: 'ANNULEE', motifAnnulation: motif },
+    });
+    this.syncStatutToSource(d.prescriptionSourceId, 'ANNULEE', motif);
+    return demandeMaj;
   }
 
-  async planifierRdv(id: string, dto: any, chefId: string) {
-    const d = await this.getDemandeById(id);
-    if (d.statut !== 'VALIDEE') throw new BadRequestException(`Statut invalide: ${d.statut}`);
-  // === BLOC AJOUTÉ : Si créneau fourni par le CHEF, l'utiliser directement ===
-  if (dto.dateRDV && dto.heureDebut && dto.salle) {
-    const dateRdv = new Date(dto.dateRDV);
-    const conflit = await this.prisma.eegRdv.findFirst({
-      where: {
-        dateRdv: dateRdv,
-        heureDebut: dto.heureDebut,
-        salle: dto.salle,
-      },
-    });
-    if (conflit) throw new BadRequestException('Créneau déjà occupé');
+  async planifierRdv(id: string, dto: PlanifierRdvDto, technicienId: string) {
+    const d = await this.resolveOrPromote(id);
+    if (d.statut !== 'CREEE')
+      throw new BadRequestException(`Statut invalide: ${d.statut}`);
 
-    const heureNum = parseInt(dto.heureDebut.split(':')[0]);
-    const heureFin = `${String(heureNum + 1).padStart(2, '0')}:00`;
+    // Si créneau fourni explicitement, l'utiliser directement
+    if (dto.dateRDV && dto.heureDebut && dto.salle) {
+      const dateRdv = new Date(dto.dateRDV);
+      const conflit = await this.prisma.eegRdv.findFirst({
+        where: {
+          dateRdv: dateRdv,
+          heureDebut: dto.heureDebut,
+          salle: dto.salle,
+        },
+      });
+      if (conflit) throw new BadRequestException('Créneau déjà occupé');
 
-    await this.prisma.eegRdv.create({
-      data: {
-        patientId: d.patientId,
-        prescripteurId: d.prescripteurId,
-        demandeId: id,
-        typeEEG: d.typeEEG,
-        salle: dto.salle,
-        priorite: d.urgence,
-        dateRdv: dateRdv,
-        heureDebut: dto.heureDebut,
-        heureFin: heureFin,
-        dureeMinutes: 60,
-        renseignementClinique: d.motifPrescription,
-      },
-    });
+      const heureNum = parseInt(dto.heureDebut.split(':')[0]);
+      const heureFin = `${String(heureNum + 1).padStart(2, '0')}:00`;
 
-    return this.prisma.eegDemande.update({
-      where: { id },
-      data: { statut: 'PLANIFIEE', dateRDV: dateRdv },
-    });
-  }
-  // === FIN BLOC AJOUTÉ ===
+      await this.prisma.eegRdv.create({
+        data: {
+          patientId: d.patientId,
+          prescripteurId: d.prescripteurId,
+          demandeId: d.id,
+          typeEEG: d.typeEEG,
+          salle: dto.salle,
+          priorite: d.urgence,
+          dateRdv: dateRdv,
+          heureDebut: dto.heureDebut,
+          heureFin: heureFin,
+          dureeMinutes: 60,
+          renseignementClinique: d.motifPrescription,
+        },
+      });
 
+      const demandeMaj = await this.prisma.eegDemande.update({
+        where: { id: d.id },
+        data: { statut: 'PLANIFIEE', dateRDV: dateRdv, technicienId },
+      });
+      this.syncStatutToSource(d.prescriptionSourceId, 'PLANIFIEE');
+      return demandeMaj;
+    }
 
     const maintenant = new Date();
     const jPlus2 = new Date(maintenant);
@@ -175,10 +292,14 @@ export class DemandesService {
       for (const salle of salles) {
         for (let h = 8; h < 17 && !trouve; h++) {
           const debut = `${String(h).padStart(2, '0')}:00`;
-          const occupe = rdvsExistants.some(r => {
+          const occupe = rdvsExistants.some((r) => {
             if (!r || !r.salle || !r.heureDebut || !r.dateRdv) return false;
             const rDate = new Date(r.dateRdv).toDateString();
-            return rDate === date.toDateString() && r.salle === salle && r.heureDebut === debut;
+            return (
+              rDate === date.toDateString() &&
+              r.salle === salle &&
+              r.heureDebut === debut
+            );
           });
           if (!occupe) {
             dateChoisie = new Date(date);
@@ -190,7 +311,8 @@ export class DemandesService {
       }
     }
 
-    if (!trouve || !dateChoisie) throw new BadRequestException('Aucun créneau disponible trouvé');
+    if (!trouve || !dateChoisie)
+      throw new BadRequestException('Aucun créneau disponible trouvé');
 
     const heureNum = parseInt(heureDebut.split(':')[0]);
     const fin = `${String(heureNum + 1).padStart(2, '0')}:00`;
@@ -199,7 +321,7 @@ export class DemandesService {
       data: {
         patientId: d.patientId,
         prescripteurId: d.prescripteurId,
-        demandeId: id,
+        demandeId: d.id,
         typeEEG: d.typeEEG,
         salle: salleChoisie,
         priorite: d.urgence,
@@ -211,22 +333,27 @@ export class DemandesService {
       },
     });
 
-    return this.prisma.eegDemande.update({
-      where: { id },
-      data: { statut: 'PLANIFIEE', dateRDV: dateChoisie },
+    const demandeMaj = await this.prisma.eegDemande.update({
+      where: { id: d.id },
+      data: { statut: 'PLANIFIEE', dateRDV: dateChoisie, technicienId },
     });
+    this.syncStatutToSource(d.prescriptionSourceId, 'PLANIFIEE');
+    return demandeMaj;
   }
 
   async realiserDemande(id: string, techId: string) {
-    const d = await this.getDemandeById(id);
-    if (!((d.statut === 'CREEE' && d.urgence === 'STAT') || d.statut === 'PLANIFIEE')) {
+    const d = await this.resolveOrPromote(id);
+    if (!(
+      (d.statut === 'CREEE' && d.urgence === 'STAT') ||
+      d.statut === 'PLANIFIEE'
+    )) {
       throw new BadRequestException(`Statut invalide: ${d.statut}`);
     }
 
     // Vérification de la cohérence avec le RDV lié (Phase 4)
     // Si un RDV est associé à la demande, son statut ne doit pas être ANNULE ou NON_REALISE
     if (d.rdv) {
-      const statutRdv = (d.rdv as any).statut as string;
+      const statutRdv = (d.rdv as { statut?: string }).statut;
       if (statutRdv === 'ANNULE' || statutRdv === 'NON_REALISE') {
         throw new BadRequestException(
           'Impossible de réaliser cette demande : le rendez-vous associé est annulé ou non réalisé',
@@ -235,86 +362,89 @@ export class DemandesService {
     }
     // Si aucun RDV n'est lié (ex. demande CREEE + STAT), la vérification est ignorée
 
-    return this.prisma.eegDemande.update({ where: { id }, data: { statut: 'EN_COURS', dateRealisation: new Date() } });
+    const demandeMaj = await this.prisma.eegDemande.update({
+      where: { id: d.id },
+      data: {
+        statut: 'EN_COURS',
+        dateRealisation: new Date(),
+        technicienId: techId,
+      },
+    });
+    this.syncStatutToSource(d.prescriptionSourceId, 'EN_COURS');
+    return demandeMaj;
   }
 
-
-  async interpreterDemande(id: string, brouillon: any, medecinId: string) {
+  /**
+   * Le chef de service interprète le résultat et l'archive en une seule action
+   * (plus d'étape de validation séparée). Une notification "résultat disponible"
+   * est envoyée automatiquement — il n'y a plus d'accusé de réception manuel.
+   */
+  async archiverResultat(
+    id: string,
+    compteRendu: ArchiverResultatDto,
+    chefId: string,
+  ) {
     const d = await this.getDemandeById(id);
-    if (d.statut !== 'EN_COURS') throw new BadRequestException(`Statut invalide: ${d.statut}`);
+    if (d.statut !== 'EN_COURS')
+      throw new BadRequestException(`Statut invalide: ${d.statut}`);
 
-    const existant = await this.prisma.eegResultat.findUnique({ where: { demandeId: id } });
+    const existant = await this.prisma.eegResultat.findUnique({
+      where: { demandeId: id },
+    });
 
-    // Contrôle d'immutabilité : un résultat déjà figé ne peut plus être réinterprété directement
     if (existant?.estImmutable) {
       throw new BadRequestException(
-        'Ce résultat est immuable et ne peut plus être modifié directement (utiliser la rectification)',
+        'Ce résultat est déjà archivé (utiliser la rectification pour le corriger)',
       );
     }
 
-    // Champs écrits explicitement pour éviter la persistance de champs non désirés
     const data = {
-      rythmesDeFond:          brouillon.rythmesDeFond          ?? null,
-      anomaliesDetectees:     brouillon.anomaliesDetectees     ?? null,
-      conclusionDiagnostique: brouillon.conclusionDiagnostique ?? null,
-      compteRendu:            brouillon.compteRendu            ?? null,
-      estCritique:            brouillon.estCritique            ?? false,
+      aeActuel: compteRendu.aeActuel ?? null,
+      age1ereCrise: compteRendu.age1ereCrise ?? null,
+      dpm: compteRendu.dpm ?? null,
+      typeCrises: compteRendu.typeCrises ?? null,
+      autresRc: compteRendu.autresRc ?? null,
+      dateDerniereCrise: compteRendu.dateDerniereCrise ?? null,
+      activiteDeFond: compteRendu.activiteDeFond ?? null,
+      anomaliesAuRepos: compteRendu.anomaliesAuRepos ?? null,
+      testActivationHpn: compteRendu.testActivationHpn ?? null,
+      testActivationSli: compteRendu.testActivationSli ?? null,
+      conclusion: compteRendu.conclusion ?? null,
+      conduiteATenir: compteRendu.conduiteATenir ?? null,
+      estCritique: compteRendu.estCritique ?? false,
+      estImmutable: true,
+      dateValidation: new Date(),
     };
 
     if (existant) {
       await this.prisma.eegResultat.update({ where: { demandeId: id }, data });
     } else {
       await this.prisma.eegResultat.create({
-        data: { demandeId: id, ...data, medecinValidateurId: medecinId },
+        data: { demandeId: id, ...data, medecinValidateurId: chefId },
       });
     }
-    return this.prisma.eegDemande.update({ where: { id }, data: { statut: 'EN_INTERPRETATION' } });
-  }
 
-
-  async validerCR(id: string, chefId: string) {
-    const d = await this.getDemandeById(id);
-    if (d.statut !== 'EN_INTERPRETATION') throw new BadRequestException(`Statut invalide: ${d.statut}`);
-    await this.prisma.eegResultat.update({
-      where: { demandeId: id },
-      data: { estImmutable: true, dateValidation: new Date() },
-    });
-    return this.prisma.eegDemande.update({
+    const demandeMaj = await this.prisma.eegDemande.update({
       where: { id },
       data: { statut: 'RESULTAT_DISPONIBLE', dateValidation: new Date() },
     });
-  }
+    this.syncStatutToSource(d.prescriptionSourceId, 'RESULTAT_DISPONIBLE');
 
-  async accuserReception(id: string, medecinId: string) {
-    const d = await this.getDemandeById(id);
-    if (d.statut !== 'RESULTAT_DISPONIBLE') throw new BadRequestException(`Statut invalide: ${d.statut}`);
-    return this.prisma.eegDemande.update({ where: { id }, data: { statut: 'ACK_RECU', dateAck: new Date() } });
-  }
+    // Notification automatique de résultat disponible (remplace l'ancien accusé de réception manuel)
+    this.notificationService
+      .sendNotification({
+        type: 'RESULTAT_DISPONIBLE',
+        motif: `Résultat EEG disponible pour la demande ${demandeMaj.numeroEEG}`,
+        urgence: d.urgence === 'STAT' ? 3 : d.urgence === 'URGENTE' ? 2 : 1,
+        sourceServiceId: process.env.EEG_SERVICE_ID,
+        sourceServiceName: 'EEG',
+        patientId: demandeMaj.patientId,
+        sentAt: new Date().toISOString(),
+      })
+      .catch((err: unknown) =>
+        console.error('Erreur notification:', getErrorMessage(err)),
+      );
 
-  async creerDemande(data: any, prescripteurId: string) {
-    // Envoi de notification simplifié
-    this.notificationService.sendNotification({
-      type: "DEMANDE_EXAMEN",
-      motif: `Nouvelle demande EEG pour patient ${data.patientId}`,
-      urgence: data.urgence === "STAT" ? 3 : data.urgence === "URGENTE" ? 2 : 1,
-      sourceServiceId: process.env.EEG_SERVICE_ID,
-      sourceServiceName: "EEG",
-      patientId: data.patientId,
-      sentAt: new Date().toISOString(),
-    }).catch(err => console.error("Erreur notification:", err.message));
-
-    const demande = await this.prisma.eegDemande.create({
-      data: {
-        patientId: data.patientId,
-        prescripteurId: prescripteurId,
-        typeEEG: data.typeEEG,
-        urgence: data.urgence || 'NORMALE',
-        motifPrescription: data.motifPrescription || data.renseignements,
-        episodeSoinsId: data.episodeSoinsId || data.chuId || 'EXTERNE',
-        numeroEEG: `EEG-${Date.now()}`,
-      },
-      include: { prescripteur: true },
-    });
-    return this.patientLookup.attachPatientInfo(demande, data.patient);
+    return demandeMaj;
   }
 }

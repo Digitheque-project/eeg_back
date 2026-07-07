@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
+import axios from 'axios';
+import { getErrorMessage } from '../../common/utils/error.util';
 
 export interface AccueilPatientDto {
   id: string;
@@ -34,7 +36,9 @@ export class AccueilClientService {
   private readonly chuId: string;
 
   constructor(private readonly httpService: HttpService) {
-    this.baseUrl = process.env.ACCUEIL_API_URL || 'https://acceuil-back-production.up.railway.app/accueil';
+    this.baseUrl =
+      process.env.ACCUEIL_API_URL ||
+      'https://acceuil-back-production.up.railway.app/accueil';
     this.chuId = process.env.CHU_ID || '72d49761-2a65-446d-b025-15a74cac1ad4';
   }
 
@@ -66,7 +70,10 @@ export class AccueilClientService {
    * @param externalPatientId - External patient ID
    * @returns Normalized patient data or null if not found/unavailable
    */
-  async getPatientByExternalId(externalPatientId: string, chuId: string = this.chuId): Promise<NormalizedPatient | null> {
+  async getPatientByExternalId(
+    externalPatientId: string,
+    chuId: string = this.chuId,
+  ): Promise<NormalizedPatient | null> {
     try {
       this.logger.log(`Fetching patient ${externalPatientId} from Accueil`);
 
@@ -81,16 +88,20 @@ export class AccueilClientService {
         ),
       );
 
-      this.logger.log(`Successfully fetched patient ${externalPatientId} from Accueil`);
+      this.logger.log(
+        `Successfully fetched patient ${externalPatientId} from Accueil`,
+      );
       return this.normalize(response.data);
     } catch (error) {
-      if (error.response?.status === 404) {
-        this.logger.warn(`Patient ${externalPatientId} not found in Accueil (404)`);
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        this.logger.warn(
+          `Patient ${externalPatientId} not found in Accueil (404)`,
+        );
         return null;
       }
 
       this.logger.warn(
-        `Failed to fetch patient ${externalPatientId} from Accueil: ${error.message}`,
+        `Failed to fetch patient ${externalPatientId} from Accueil: ${getErrorMessage(error)}`,
       );
       return null;
     }
@@ -99,7 +110,10 @@ export class AccueilClientService {
   /**
    * List patients for a CHU, optionally filtered client-side by a search term
    */
-  async listPatients(chuId: string = this.chuId, search?: string): Promise<NormalizedPatient[]> {
+  async listPatients(
+    chuId: string = this.chuId,
+    search?: string,
+  ): Promise<NormalizedPatient[]> {
     try {
       const response = await firstValueFrom(
         this.httpService.get<AccueilPatientDto[]>(`${this.baseUrl}/patients`, {
@@ -114,10 +128,14 @@ export class AccueilClientService {
 
       const term = search.toLowerCase();
       return patients.filter(
-        (p) => p.nom.toLowerCase().includes(term) || p.prenom.toLowerCase().includes(term),
+        (p) =>
+          p.nom.toLowerCase().includes(term) ||
+          p.prenom.toLowerCase().includes(term),
       );
     } catch (error) {
-      this.logger.warn(`Failed to list patients from Accueil: ${error.message}`);
+      this.logger.warn(
+        `Failed to list patients from Accueil: ${getErrorMessage(error)}`,
+      );
       return [];
     }
   }
@@ -134,7 +152,8 @@ export class AccueilClientService {
       const payload: Record<string, any> = {};
       if (dto.nom !== undefined) payload.nom = dto.nom;
       if (dto.prenom !== undefined) payload.prenom = dto.prenom;
-      if (dto.sexe !== undefined) payload.sexe = dto.sexe === 'M' ? 'MALE' : 'FEMALE';
+      if (dto.sexe !== undefined)
+        payload.sexe = dto.sexe === 'M' ? 'MALE' : 'FEMALE';
 
       const response = await firstValueFrom(
         this.httpService.patch<AccueilPatientDto>(
@@ -150,7 +169,9 @@ export class AccueilClientService {
 
       return this.normalize(response.data);
     } catch (error) {
-      this.logger.warn(`Failed to update patient ${id} in Accueil: ${error.message}`);
+      this.logger.warn(
+        `Failed to update patient ${id} in Accueil: ${getErrorMessage(error)}`,
+      );
       return null;
     }
   }

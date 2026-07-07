@@ -5,10 +5,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { EegModule } from './eeg/eeg.module';
 
 @Module({
-  imports: [
-    PrismaModule,
-    EegModule,
-  ],
+  imports: [PrismaModule, EegModule],
   controllers: [AppController],
   providers: [AppService],
 })

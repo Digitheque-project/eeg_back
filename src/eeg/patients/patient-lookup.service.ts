@@ -32,9 +32,13 @@ export class PatientLookupService {
    * caller-provided data (e.g. from an external prescription DTO) if
    * Accueil is unreachable or the patient isn't found there.
    */
-  async getPatientInfo(patientId: string, fallback?: PatientFallback): Promise<PatientInfo> {
+  async getPatientInfo(
+    patientId: string,
+    fallback?: PatientFallback,
+  ): Promise<PatientInfo> {
     const idDossier = await this.getIdDossier(patientId);
-    const accueilPatient = await this.accueilClient.getPatientByExternalId(patientId);
+    const accueilPatient =
+      await this.accueilClient.getPatientByExternalId(patientId);
 
     if (accueilPatient) {
       return {
@@ -47,7 +51,9 @@ export class PatientLookupService {
       };
     }
 
-    this.logger.warn(`Accueil unavailable for patient ${patientId}, using fallback`);
+    this.logger.warn(
+      `Accueil unavailable for patient ${patientId}, using fallback`,
+    );
     return {
       nom: fallback?.nom ?? null,
       prenom: fallback?.prenom ?? null,
@@ -63,7 +69,9 @@ export class PatientLookupService {
    * idDossier has no equivalent in Accueil — it's purely local bookkeeping.
    */
   async getIdDossier(patientId: string): Promise<string | null> {
-    const dossier = await this.prisma.eegDossier.findUnique({ where: { patientId } });
+    const dossier = await this.prisma.eegDossier.findUnique({
+      where: { patientId },
+    });
     return dossier?.idDossier ?? null;
   }
 
@@ -76,7 +84,9 @@ export class PatientLookupService {
     return dossier.idDossier;
   }
 
-  async getPatientCounts(patientId: string): Promise<{ demandes: number; rdvs: number }> {
+  async getPatientCounts(
+    patientId: string,
+  ): Promise<{ demandes: number; rdvs: number }> {
     const [demandes, rdvs] = await Promise.all([
       this.prisma.eegDemande.count({ where: { patientId } }),
       this.prisma.eegRdv.count({ where: { patientId } }),
@@ -100,6 +110,8 @@ export class PatientLookupService {
   async attachPatientInfoToMany<T extends { patientId: string }>(
     entities: T[],
   ): Promise<(T & { patient: PatientInfo })[]> {
-    return Promise.all(entities.map((entity) => this.attachPatientInfo(entity)));
+    return Promise.all(
+      entities.map((entity) => this.attachPatientInfo(entity)),
+    );
   }
 }

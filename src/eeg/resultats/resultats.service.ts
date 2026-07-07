@@ -25,13 +25,16 @@ export class ResultatsService {
     // Vérifier extension
     const ext = path.extname(fichier.originalname).toLowerCase();
     if (!['.png', '.jpg', '.jpeg'].includes(ext)) {
-      throw new BadRequestException('Seuls les formats PNG et JPG sont acceptés');
+      throw new BadRequestException(
+        'Seuls les formats PNG et JPG sont acceptés',
+      );
     }
 
     const demande = await this.prisma.eegDemande.findUnique({
       where: { id: demandeId },
     });
-    if (!demande) throw new NotFoundException(`Demande ${demandeId} introuvable`);
+    if (!demande)
+      throw new NotFoundException(`Demande ${demandeId} introuvable`);
 
     // Contrôle d'immutabilité : bloquer l'upload si le résultat est déjà figé
     const existant = await this.prisma.eegResultat.findUnique({
@@ -69,6 +72,23 @@ export class ResultatsService {
     });
   }
 
+  // ─── Récupération du chemin de l'image tracé (pour affichage) ─────
+  async getCheminImage(
+    demandeId: string,
+  ): Promise<{ cheminFichier: string; nomFichier: string }> {
+    const resultat = await this.prisma.eegResultat.findUnique({
+      where: { demandeId },
+      select: { fichierImagePath: true, nomFichierImage: true },
+    });
+    if (!resultat?.fichierImagePath) {
+      throw new NotFoundException('Aucune image pour cette demande');
+    }
+    return {
+      cheminFichier: resultat.fichierImagePath,
+      nomFichier: resultat.nomFichierImage ?? 'trace',
+    };
+  }
+
   // ─── Rectification d'un résultat immuable ─────────────────────────
   async rectifierResultat(
     resultatId: string,
@@ -89,33 +109,47 @@ export class ResultatsService {
       );
     }
 
-    // Créer la trace de rectification (audit trail)
+    // Champs du compte rendu — cf. ArchiverResultatDto / formulaire papier réel
+    const CHAMPS_CLINIQUES = [
+      'aeActuel',
+      'age1ereCrise',
+      'dpm',
+      'typeCrises',
+      'autresRc',
+      'dateDerniereCrise',
+      'activiteDeFond',
+      'anomaliesAuRepos',
+      'testActivationHpn',
+      'testActivationSli',
+      'conclusion',
+      'conduiteATenir',
+    ] as const;
+
+    const ancienneVersion: Record<string, string | null> = {};
+    const nouvelleVersion: Record<string, string> = {};
+    const miseAJour: Record<string, string | number> = {
+      version: resultat.version + 1,
+    };
+
+    for (const champ of CHAMPS_CLINIQUES) {
+      const nouvelleValeur = dto[champ];
+      if (nouvelleValeur !== undefined) {
+        ancienneVersion[champ] = resultat[champ];
+        nouvelleVersion[champ] = nouvelleValeur;
+        miseAJour[champ] = nouvelleValeur;
+      }
+    }
+
+    // Créer la trace de rectification (audit trail) — snapshot avant/après
     await this.prisma.eegRectification.create({
       data: {
         resultatId,
         auteurId,
         motif: dto.motif,
-        // Conserver le contenu ANCIEN
-        ancienCompteRendu:    resultat.compteRendu            ?? null,
-        ancienRythmesDeFond:  resultat.rythmesDeFond          ?? null,
-        ancienAnomalies:      resultat.anomaliesDetectees      ?? null,
-        ancienneConclusion:   resultat.conclusionDiagnostique  ?? null,
-        // Enregistrer le contenu NOUVEAU
-        nouveauCompteRendu:   dto.nouveauCompteRendu           ?? null,
-        nouveauRythmesDeFond: dto.nouveauRythmesDeFond          ?? null,
-        nouveauAnomalies:     dto.nouveauAnomalies              ?? null,
-        nouvelleConclusion:   dto.nouvelleConclusion            ?? null,
+        ancienneVersion,
+        nouvelleVersion,
       },
     });
-
-    // Construire l'objet de mise à jour (uniquement les champs fournis)
-    const miseAJour: Record<string, string | number | null> = {
-      version: resultat.version + 1,
-    };
-    if (dto.nouveauCompteRendu   !== undefined) miseAJour.compteRendu            = dto.nouveauCompteRendu;
-    if (dto.nouveauRythmesDeFond !== undefined) miseAJour.rythmesDeFond          = dto.nouveauRythmesDeFond;
-    if (dto.nouveauAnomalies     !== undefined) miseAJour.anomaliesDetectees     = dto.nouveauAnomalies;
-    if (dto.nouvelleConclusion   !== undefined) miseAJour.conclusionDiagnostique = dto.nouvelleConclusion;
 
     return this.prisma.eegResultat.update({
       where: { id: resultatId },

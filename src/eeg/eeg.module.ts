@@ -1,4 +1,4 @@
-import { ExternalModule } from "./external/external.module";
+import { ExternalModule } from './external/external.module';
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { DemandesController } from './demandes/demandes.controller';
@@ -26,10 +26,6 @@ import { CommonModule } from '../common/common.module';
     RdvsController,
     PatientsController,
   ],
-  providers: [
-    DemandesService,
-    ResultatsService,
-    EegSchedulerService,
-  ],
+  providers: [DemandesService, ResultatsService, EegSchedulerService],
 })
 export class EegModule {}

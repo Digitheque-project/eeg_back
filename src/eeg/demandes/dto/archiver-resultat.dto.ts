@@ -1,15 +1,13 @@
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsOptional, IsString } from 'class-validator';
 
 /**
- * DTO d'entrée pour la rectification d'un résultat EEG immuable.
- * Les champs cliniques à rectifier sont tous optionnels : seuls ceux fournis
- * seront mis à jour. Le motif est obligatoire pour assurer la traçabilité.
+ * DTO pour l'archivage du compte rendu par le chef de service.
+ * Interpréter = archiver en une seule action (pas de brouillon séparé).
+ * Champs alignés sur le formulaire papier réel du CHU Andrainjato — seule
+ * cette section (CLINIQUE, INTERPRETATION, CONCLUSION, CONDUITE A TENIR)
+ * est saisie manuellement, le reste du document étant rempli automatiquement.
  */
-export class RectifierResultatDto {
-  @IsString()
-  @IsNotEmpty({ message: 'Le motif de rectification est obligatoire' })
-  motif: string;
-
+export class ArchiverResultatDto {
   // CLINIQUE
   @IsString()
   @IsOptional()
@@ -60,4 +58,8 @@ export class RectifierResultatDto {
   @IsString()
   @IsOptional()
   conduiteATenir?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  estCritique?: boolean;
 }

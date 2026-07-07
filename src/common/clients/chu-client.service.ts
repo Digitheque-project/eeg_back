@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
+import { getErrorMessage } from '../utils/error.util';
 
 export interface ChuInfoDto {
   id: string;
@@ -29,9 +30,12 @@ export class ChuClientService {
   private readonly serviceId: string;
 
   constructor(private readonly httpService: HttpService) {
-    this.baseUrl = process.env.CHU_API_URL || 'https://service-chu-back-production-d6a8.up.railway.app/service-chu';
+    this.baseUrl =
+      process.env.CHU_API_URL ||
+      'https://service-chu-back-production-d6a8.up.railway.app/service-chu';
     this.chuId = process.env.CHU_ID || '72d49761-2a65-446d-b025-15a74cac1ad4';
-    this.serviceId = process.env.EEG_SERVICE_ID || '9d965b9f-4737-435f-abe9-73db0d3cf973';
+    this.serviceId =
+      process.env.EEG_SERVICE_ID || '9d965b9f-4737-435f-abe9-73db0d3cf973';
   }
 
   /**
@@ -48,7 +52,9 @@ export class ChuClientService {
       );
       return response.data;
     } catch (error) {
-      this.logger.warn(`Failed to fetch CHU ${chuId}: ${error.message}`);
+      this.logger.warn(
+        `Failed to fetch CHU ${chuId}: ${getErrorMessage(error)}`,
+      );
       return null;
     }
   }
@@ -57,17 +63,24 @@ export class ChuClientService {
    * Get service info by id
    * @param serviceId - Service id, defaults to this service's own EEG_SERVICE_ID
    */
-  async getServiceInfo(serviceId: string = this.serviceId): Promise<ServiceInfoDto | null> {
+  async getServiceInfo(
+    serviceId: string = this.serviceId,
+  ): Promise<ServiceInfoDto | null> {
     try {
       const response = await firstValueFrom(
-        this.httpService.get<ServiceInfoDto>(`${this.baseUrl}/service/${serviceId}`, {
-          timeout: 5000,
-          headers: { 'Content-Type': 'application/json' },
-        }),
+        this.httpService.get<ServiceInfoDto>(
+          `${this.baseUrl}/service/${serviceId}`,
+          {
+            timeout: 5000,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
       );
       return response.data;
     } catch (error) {
-      this.logger.warn(`Failed to fetch service ${serviceId}: ${error.message}`);
+      this.logger.warn(
+        `Failed to fetch service ${serviceId}: ${getErrorMessage(error)}`,
+      );
       return null;
     }
   }

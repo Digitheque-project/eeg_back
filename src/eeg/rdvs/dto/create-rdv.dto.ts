@@ -5,7 +5,6 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
-  IsUUID,
   Min,
 } from 'class-validator';
 import { TypeEEG, NiveauUrgence } from '@prisma/client';
@@ -13,17 +12,20 @@ import { TypeEEG, NiveauUrgence } from '@prisma/client';
 /**
  * DTO pour la création directe d'un RDV via le module RDVs.
  * Distinct de PlanifierRdvDto (qui opère sur une demande existante).
+ * patientId/prescripteurId ne sont pas des UUID : le premier vient
+ * d'Accueil (format CHU-YYYY-NNNNN), le second peut être un compte
+ * simulé (format "tec-...", "med-...").
  */
 export class CreateRdvDto {
-  @IsUUID()
+  @IsString()
   @IsNotEmpty()
   patientId: string;
 
-  @IsUUID()
+  @IsString()
   @IsNotEmpty()
   prescripteurId: string;
 
-  @IsUUID()
+  @IsString()
   @IsOptional()
   demandeId?: string;
 

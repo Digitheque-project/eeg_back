@@ -34,7 +34,7 @@ describe('ChuClientService', () => {
         status: 200,
         statusText: 'OK',
         headers: {},
-        config: {} as any,
+        config: {} as AxiosResponse['config'],
       };
       jest.spyOn(httpService, 'get').mockReturnValue(of(mockResponse));
 
@@ -44,7 +44,9 @@ describe('ChuClientService', () => {
     });
 
     it('should return null on error instead of throwing', async () => {
-      jest.spyOn(httpService, 'get').mockReturnValue(throwError(() => new Error('Network Error')));
+      jest
+        .spyOn(httpService, 'get')
+        .mockReturnValue(throwError(() => new Error('Network Error')));
 
       const result = await service.getMyServiceInfo();
 
@@ -54,7 +56,9 @@ describe('ChuClientService', () => {
 
   describe('getChuInfo', () => {
     it('should return null on error instead of throwing', async () => {
-      jest.spyOn(httpService, 'get').mockReturnValue(throwError(() => new Error('Network Error')));
+      jest
+        .spyOn(httpService, 'get')
+        .mockReturnValue(throwError(() => new Error('Network Error')));
 
       const result = await service.getChuInfo();
 
