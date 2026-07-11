@@ -145,6 +145,10 @@ model EegRdv {
   prescripteurId          String
   demandeId               String?       @unique
   typeEEG                 String
+  // Une seule salle pour l'instant (pas de sélection utilisateur) — le
+  // champ existe déjà pour ne pas tout refaire quand plusieurs salles
+  // réelles seront disponibles.
+  salle                   String        @default("Salle EEG 1")
   priorite                NiveauUrgence
   statut                  StatutRdv     @default(EN_ATTENTE)
   dateRdv                 DateTime
