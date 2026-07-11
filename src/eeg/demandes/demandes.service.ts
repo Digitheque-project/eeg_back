@@ -11,6 +11,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { PatientLookupService } from '../patients/patient-lookup.service';
 import { getErrorMessage } from '../../common/utils/error.util';
+import { estWeekend, ajouterMinutes } from '../../common/utils/date.util';
 import { PlanifierRdvDto } from './dto/planifier-rdv.dto';
 import { ArchiverResultatDto } from './dto/archiver-resultat.dto';
 
@@ -255,28 +256,24 @@ export class DemandesService {
     return demandeMaj;
   }
 
-  /** "08:30" + 90 → "10:00" */
-  private ajouterMinutes(heureDebut: string, dureeMinutes: number): string {
-    const [h, m] = heureDebut.split(':').map(Number);
-    const total = h * 60 + m + dureeMinutes;
-    const heureFin = Math.floor(total / 60) % 24;
-    const minuteFin = total % 60;
-    return `${String(heureFin).padStart(2, '0')}:${String(minuteFin).padStart(2, '0')}`;
-  }
-
   async planifierRdv(id: string, dto: PlanifierRdvDto, technicienId: string) {
     const d = await this.resolveOrPromote(id);
     if (d.statut !== 'CREEE')
       throw new BadRequestException(`Statut invalide: ${d.statut}`);
 
     const dateRdv = new Date(dto.dateRDV);
+    if (estWeekend(dateRdv)) {
+      throw new BadRequestException(
+        'Impossible de planifier un RDV le week-end',
+      );
+    }
     const conflit = await this.prisma.eegRdv.findFirst({
       where: { dateRdv, heureDebut: dto.heureDebut },
     });
     if (conflit) throw new BadRequestException('Créneau déjà occupé');
 
     const dureeMinutes = dto.dureeMinutes ?? 60;
-    const heureFin = this.ajouterMinutes(dto.heureDebut, dureeMinutes);
+    const heureFin = ajouterMinutes(dto.heureDebut, dureeMinutes);
 
     await this.prisma.eegRdv.create({
       data: {

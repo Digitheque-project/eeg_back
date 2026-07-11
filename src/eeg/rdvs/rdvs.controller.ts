@@ -8,11 +8,13 @@ import {
   Body,
   Query,
   Logger,
+  BadRequestException,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StatutRdv } from '@prisma/client';
 import { PatientLookupService } from '../patients/patient-lookup.service';
+import { estWeekend, ajouterMinutes } from '../../common/utils/date.util';
 import { CreateRdvDto } from './dto/create-rdv.dto';
 import { ModifierRdvDto } from './dto/modifier-rdv.dto';
 import { RealiserRdvDto } from './dto/realiser-rdv.dto';
@@ -139,6 +141,12 @@ export class RdvsController {
 
   @Post()
   async creerRdv(@Body() body: CreateRdvDto) {
+    const dateRdv = new Date(body.dateRdv);
+    if (estWeekend(dateRdv)) {
+      throw new BadRequestException(
+        'Impossible de planifier un RDV le week-end',
+      );
+    }
     const rdv = await this.prisma.eegRdv.create({
       data: {
         patientId: body.patientId,
@@ -146,7 +154,7 @@ export class RdvsController {
         demandeId: body.demandeId ?? null,
         typeEEG: body.typeEEG,
         priorite: body.priorite,
-        dateRdv: new Date(body.dateRdv),
+        dateRdv,
         heureDebut: body.heureDebut,
         heureFin: body.heureFin,
         dureeMinutes: body.dureeMinutes,
@@ -162,10 +170,25 @@ export class RdvsController {
   @Patch(':id')
   async modifierRdv(@Param('id') id: string, @Body() body: ModifierRdvDto) {
     const data: Partial<ModifierRdvDto & { dateRdv: Date }> = {};
-    if (body.dateRdv) data.dateRdv = new Date(body.dateRdv) as any;
+    if (body.dateRdv) {
+      const dateRdv = new Date(body.dateRdv);
+      if (estWeekend(dateRdv)) {
+        throw new BadRequestException(
+          'Impossible de planifier un RDV le week-end',
+        );
+      }
+      data.dateRdv = dateRdv as any;
+    }
     if (body.heureDebut) data.heureDebut = body.heureDebut;
-    if (body.heureFin) data.heureFin = body.heureFin;
     if (body.dureeMinutes) data.dureeMinutes = body.dureeMinutes;
+    // heureFin est recalculée dès que heureDebut et/ou dureeMinutes changent
+    // (le formulaire simplifié n'envoie plus heureFin directement) — sauf
+    // si elle est explicitement fournie, pour les autres appelants API.
+    if (body.heureFin) {
+      data.heureFin = body.heureFin;
+    } else if (body.heureDebut && body.dureeMinutes) {
+      data.heureFin = ajouterMinutes(body.heureDebut, body.dureeMinutes);
+    }
     if (body.statut) data.statut = body.statut;
     if (body.renseignementClinique !== undefined)
       data.renseignementClinique = body.renseignementClinique;
