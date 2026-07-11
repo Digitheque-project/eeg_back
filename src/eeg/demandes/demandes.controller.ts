@@ -60,8 +60,7 @@ export class DemandesController {
     @Body('motif') motif: string,
     @Request() req: AuthenticatedRequest,
   ) {
-    const technicienId =
-      req.user?.id ?? 'tec-00000000-0000-0000-0000-000000000002';
+    const technicienId = req.user!.id;
     return this.demandesService.refuserDemande(id, motif, technicienId);
   }
 
@@ -77,8 +76,7 @@ export class DemandesController {
     @Body() dto: PlanifierRdvDto,
     @Request() req: AuthenticatedRequest,
   ) {
-    const technicienId =
-      req.user?.id ?? 'tec-00000000-0000-0000-0000-000000000002';
+    const technicienId = req.user!.id;
     return this.demandesService.planifierRdv(id, dto, technicienId);
   }
 
@@ -95,8 +93,7 @@ export class DemandesController {
     @Param('id') id: string,
     @Request() req: AuthenticatedRequest,
   ) {
-    const technicienId =
-      req.user?.id ?? 'tec-00000000-0000-0000-0000-000000000002';
+    const technicienId = req.user!.id;
     return this.demandesService.realiserDemande(id, technicienId);
   }
 
@@ -113,7 +110,7 @@ export class DemandesController {
     @Body() compteRendu: ArchiverResultatDto,
     @Request() req: AuthenticatedRequest,
   ) {
-    const chefId = req.user?.id ?? 'med-00000000-0000-0000-0000-000000000001';
+    const chefId = req.user!.id;
     return this.demandesService.archiverResultat(id, compteRendu, chefId);
   }
 }

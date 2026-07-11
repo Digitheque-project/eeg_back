@@ -42,8 +42,7 @@ export class ResultatsController {
     @UploadedFile() fichier: Express.Multer.File,
     @Request() req: AuthenticatedRequest,
   ) {
-    const technicienId =
-      req.user?.id ?? 'tec-00000000-0000-0000-0000-000000000002';
+    const technicienId = req.user!.id;
     return this.resultatsService.uploadImageTrace(
       demandeId,
       fichier,
@@ -90,7 +89,7 @@ export class ResultatsController {
     @Body() dto: RectifierResultatDto,
     @Request() req: AuthenticatedRequest,
   ) {
-    const auteurId = req.user?.id ?? 'med-00000000-0000-0000-0000-000000000001';
+    const auteurId = req.user!.id;
     return this.resultatsService.rectifierResultat(id, dto, auteurId);
   }
 }
