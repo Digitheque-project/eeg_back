@@ -1,16 +1,46 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PatientLookupService } from '../patients/patient-lookup.service';
+import { DemandesService } from '../demandes/demandes.service';
+import { getErrorMessage } from '../../common/utils/error.util';
 
 @Injectable()
-export class EegSchedulerService {
+export class EegSchedulerService implements OnModuleInit {
   private readonly logger = new Logger(EegSchedulerService.name);
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly patientLookup: PatientLookupService,
+    private readonly demandesService: DemandesService,
   ) {}
+
+  // Synchronisation immédiate au démarrage, puis en continu via le cron
+  // ci-dessous. Fire-and-forget : le service Prescription (Render, tombe en
+  // veille) peut mettre plusieurs dizaines de secondes à répondre à froid —
+  // ça ne doit jamais retarder le démarrage de l'appli ni son health check.
+  onModuleInit() {
+    void this.synchroniserPrescriptions();
+  }
+
+  // ─── Matérialise en local les prescriptions EEG pas encore promues ──
+  // Sans ce job, une prescription CREEE non encore ouverte par un
+  // technicien n'existe qu'en mémoire côté service Prescription : elle est
+  // invisible aux rapports (rapports.controller.ts) et à l'alerte STAT
+  // ci-dessous, qui ne portent que sur la table locale.
+  @Cron(CronExpression.EVERY_MINUTE)
+  async synchroniserPrescriptions() {
+    try {
+      const nb = await this.demandesService.syncPendingPrescriptions();
+      if (nb > 0) {
+        this.logger.log(`${nb} nouvelle(s) prescription(s) synchronisée(s)`);
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Échec de synchronisation des prescriptions: ${getErrorMessage(err)}`,
+      );
+    }
+  }
 
   // ─── Alerte EN_COURS non interprété > 24h ──────────────────────────
   @Cron(CronExpression.EVERY_HOUR)

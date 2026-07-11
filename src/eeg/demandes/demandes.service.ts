@@ -96,6 +96,31 @@ export class DemandesService {
   }
 
   /**
+   * Matérialise en local toute prescription EEG pas encore promue — appelée
+   * par EegSchedulerService pour que la base locale reste la source de
+   * vérité pour les rapports et les alertes (elles ne portent que sur des
+   * demandes locales), sans attendre qu'un technicien agisse dessus.
+   */
+  async syncPendingPrescriptions(): Promise<number> {
+    const [locales, prescriptions] = await Promise.all([
+      this.prisma.eegDemande.findMany({
+        select: { prescriptionSourceId: true },
+      }),
+      this.prescriptionClient.listEegPrescriptions(),
+    ]);
+    const sourceIdsConnus = new Set(
+      locales
+        .map((d) => d.prescriptionSourceId)
+        .filter((v): v is string => !!v),
+    );
+    const nouvelles = prescriptions.filter((p) => !sourceIdsConnus.has(p.id));
+    for (const p of nouvelles) {
+      await this.promoteToLocal(p);
+    }
+    return nouvelles.length;
+  }
+
+  /**
    * Répercute un changement de statut EEG sur la prescription source, pour
    * que le prescripteur voie l'évolution (et le motif de refus/annulation)
    * dans le service Prescription. Fire-and-forget — un échec de sync ne doit
