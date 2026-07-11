@@ -88,6 +88,16 @@ export class AccueilClientService {
         ),
       );
 
+      // Accueil renvoie parfois 200 avec un corps vide pour un id inconnu
+      // (au lieu d'un 404) — sans ce garde, normalize() produirait un
+      // patient avec un nom/prénom vide au lieu de retomber sur le fallback.
+      if (!response.data || !response.data.id) {
+        this.logger.warn(
+          `Patient ${externalPatientId} : réponse Accueil vide/invalide`,
+        );
+        return null;
+      }
+
       this.logger.log(
         `Successfully fetched patient ${externalPatientId} from Accueil`,
       );

@@ -56,14 +56,22 @@ export class DemandesService {
    * si un doublon est créé en concurrence, on retombe sur celui déjà promu.
    */
   private async promoteToLocal(p: PrescriptionEegDto) {
+    // Le service Prescription n'expose qu'un identifiant libre pour le
+    // prescripteur (pas de nom/prénom résolvable) — on l'affiche tel quel
+    // plutôt qu'un placeholder générique qui masquerait qui a prescrit.
+    // Certaines prescriptions arrivent avec prescripteurId vide (donnée
+    // source incomplète) — on leur donne un id/libellé dédié plutôt que de
+    // les faire toutes fusionner sous une même fiche "".
+    const prescripteurId = p.prescripteurId || `INCONNU-${p.id}`;
+    const prescripteurNom = p.prescripteurId || 'Prescripteur non renseigné';
     await this.prisma.utilisateur.upsert({
-      where: { id: p.prescripteurId },
+      where: { id: prescripteurId },
       update: {},
       create: {
-        id: p.prescripteurId,
-        nom: 'Prescripteur',
+        id: prescripteurId,
+        nom: prescripteurNom,
         prenom: 'Externe',
-        email: `prescripteur-${p.prescripteurId}@chu.local`,
+        email: `prescripteur-${prescripteurId}@chu.local`,
         role: 'TECHNICIEN',
         actif: true,
       },
@@ -73,7 +81,7 @@ export class DemandesService {
       return await this.prisma.eegDemande.create({
         data: {
           patientId: p.patientId,
-          prescripteurId: p.prescripteurId,
+          prescripteurId,
           typeEEG: p.typeEEG,
           urgence: p.urgence || 'NORMALE',
           motifPrescription: p.renseignements,
