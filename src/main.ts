@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
@@ -33,6 +34,7 @@ async function bootstrap() {
       'API du module Électroencéphalographie — CHU Andrainjato Fianarantsoa',
     )
     .setVersion('1.0')
+    .addBearerAuth()
     .addTag('Demandes', 'Gestion des demandes EEG')
     .addTag('Résultats', 'Upload, validation et rectification des résultats')
     .addTag('Rapports', 'Rapports et statistiques')

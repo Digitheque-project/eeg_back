@@ -64,7 +64,6 @@ export class DemandesService {
         nom: 'Prescripteur',
         prenom: 'Externe',
         email: `prescripteur-${p.prescripteurId}@chu.local`,
-        password: 'EXTERNAL',
         role: 'TECHNICIEN',
         actif: true,
       },

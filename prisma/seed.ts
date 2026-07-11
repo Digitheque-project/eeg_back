@@ -1,11 +1,9 @@
 import { PrismaClient, RoleUtilisateur, OrdreProfessionnel } from '@prisma/client';
-import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
 
 async function main() {
   console.log('🌱 Début du seed...');
-  const passwordHash = await bcrypt.hash('password123', 10);
 
   // ─── Patients ────────────────────────────────────────────────────────
   // Les patients sont désormais gérés par le service Accueil ; on ne fait
@@ -23,21 +21,21 @@ async function main() {
   console.log('✅ Dossiers EEG (patients gérés par Accueil)');
 
   // ─── Utilisateurs ────────────────────────────────────────────────────
+  // Ids alignés sur les comptes SSO réels (service auth externe) — voir
+  // JwtAuthGuard / AuthController.me : la fiche locale est provisionnée à
+  // la volée avec l'id de l'utilisateur SSO, ce seed ne fait que
+  // pré-remplir les champs métier (ordre professionnel, matricule...).
   await prisma.utilisateur.upsert({
-    where: { email: 'raharison@chu-andrainjato.mg' }, update: {},
-    create: { id: 'med-00000000-0000-0000-0000-000000000001', nom: 'Raharison', prenom: 'Jean-Pierre', email: 'raharison@chu-andrainjato.mg', password: passwordHash, telephone: '+261 34 00 000 01', matricule: 'CHU-CHF-001', role: RoleUtilisateur.CHEF_SERVICE, ordresProfessionnel: OrdreProfessionnel.ONM, numeroOrdre: '12/1234/MG', actif: true },
+    where: { email: 'jean.raharison@chu-andrainjato.mg' }, update: {},
+    create: { id: '83b45e70-86e9-4fc7-beda-a66c2a944ba6', nom: 'Raharison', prenom: 'Jean', email: 'jean.raharison@chu-andrainjato.mg', telephone: '0340000002', matricule: 'EEG-CHF-001', role: RoleUtilisateur.CHEF_SERVICE, ordresProfessionnel: OrdreProfessionnel.ONM, numeroOrdre: 'ONM-2018-0123', actif: true },
   });
   await prisma.utilisateur.upsert({
-    where: { email: 'rakotomalala@chu-andrainjato.mg' }, update: {},
-    create: { id: 'tec-00000000-0000-0000-0000-000000000002', nom: 'Rakotomalala', prenom: 'Hery', email: 'rakotomalala@chu-andrainjato.mg', password: passwordHash, telephone: '+261 34 00 000 02', matricule: 'CHU-TEC-001', role: RoleUtilisateur.TECHNICIEN, ordresProfessionnel: OrdreProfessionnel.AUCUN, actif: true },
+    where: { email: 'toky.rakotomalala@chu-andrainjato.mg' }, update: {},
+    create: { id: '1abc5592-d322-4d11-9502-386038cd92cd', nom: 'Rakotomalala', prenom: 'Toky', email: 'toky.rakotomalala@chu-andrainjato.mg', telephone: '0340000001', matricule: 'EEG-TEC-001', role: RoleUtilisateur.TECHNICIEN, ordresProfessionnel: OrdreProfessionnel.AUCUN, actif: true },
   });
   await prisma.utilisateur.upsert({
-    where: { email: 'andrianasolo@chu-andrainjato.mg' }, update: {},
-    create: { id: 'maj-00000000-0000-0000-0000-000000000003', nom: 'Andrianasolo', prenom: 'Luc', email: 'andrianasolo@chu-andrainjato.mg', password: passwordHash, telephone: '+261 34 00 000 03', matricule: 'CHU-MAJ-001', role: RoleUtilisateur.MAJOR_SERVICE, ordresProfessionnel: OrdreProfessionnel.AUCUN, actif: true },
-  });
-  await prisma.utilisateur.upsert({
-    where: { email: 'randria@chu-andrainjato.mg' }, update: {},
-    create: { id: 'int-00000000-0000-0000-0000-000000000004', nom: 'Randrianantenaina', prenom: 'Soa', email: 'randria@chu-andrainjato.mg', password: passwordHash, telephone: '+261 34 00 000 04', matricule: 'CHU-MED-001', role: RoleUtilisateur.CHEF_SERVICE, ordresProfessionnel: OrdreProfessionnel.ONM, numeroOrdre: '12/5678/MG', actif: true },
+    where: { email: 'miora.andrianasolo@chu-andrainjato.mg' }, update: {},
+    create: { id: 'f0577ade-0a22-448f-98df-cb612739e4f5', nom: 'Andrianasolo', prenom: 'Miora', email: 'miora.andrianasolo@chu-andrainjato.mg', telephone: '0340000003', matricule: 'EEG-MAJ-001', role: RoleUtilisateur.MAJOR_SERVICE, ordresProfessionnel: OrdreProfessionnel.AUCUN, actif: true },
   });
   console.log('✅ Utilisateurs');
 
@@ -49,10 +47,7 @@ async function main() {
   // (planifier, refuser, réaliser). Voir DemandesService.resolveOrPromote.
 
   console.log('🎉 Seed terminé !');
-  console.log('CHEF_SERVICE | raharison@chu-andrainjato.mg | password123');
-  console.log('TECHNICIEN | rakotomalala@chu-andrainjato.mg | password123');
-  console.log('MAJOR_SERVICE | andrianasolo@chu-andrainjato.mg | password123');
-  console.log('CHEF_SERVICE | randria@chu-andrainjato.mg | password123');
+  console.log('Connexion via https://auth-client-dun.vercel.app/login (compte SSO, pas de mot de passe local)');
 }
 
 main().catch((e) => { console.error('❌', e); process.exit(1); }).finally(() => prisma.$disconnect());

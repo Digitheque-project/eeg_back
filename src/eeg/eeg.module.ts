@@ -13,10 +13,12 @@ import { RdvsController } from './rdvs/rdvs.controller';
 import { PatientsController } from './patients/patients.controller';
 import { EegSchedulerService } from './jobs/eeg-scheduler.service';
 import { CommonModule } from '../common/common.module';
+import { AuthController } from './auth/auth.controller';
 
 @Module({
   imports: [ExternalModule, CommonModule, ScheduleModule.forRoot()],
   controllers: [
+    AuthController,
     DemandesController,
     ResultatsController,
     RapportsController,
