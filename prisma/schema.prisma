@@ -145,7 +145,6 @@ model EegRdv {
   prescripteurId          String
   demandeId               String?       @unique
   typeEEG                 String
-  salle                   String
   priorite                NiveauUrgence
   statut                  StatutRdv     @default(EN_ATTENTE)
   dateRdv                 DateTime

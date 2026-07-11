@@ -30,10 +30,6 @@ export class ModifierRdvDto {
   @IsOptional()
   dureeMinutes?: number;
 
-  @IsString()
-  @IsOptional()
-  salle?: string;
-
   @IsEnum(StatutRdv)
   @IsOptional()
   statut?: StatutRdv;

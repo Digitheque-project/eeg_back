@@ -1,32 +1,25 @@
 import {
   IsDateString,
   IsInt,
+  IsNotEmpty,
   IsOptional,
   IsString,
   Min,
 } from 'class-validator';
 
 /**
- * DTO pour la planification d'un RDV depuis un endpoint de demande.
- * dateRDV + heureDebut + salle => créneau explicite fourni par le chef.
- * Si absents, le service cherche automatiquement le prochain créneau libre.
+ * DTO pour la planification d'un RDV depuis une demande — formulaire
+ * simple : date + heure de début, l'heure de fin est calculée à partir
+ * de dureeMinutes.
  */
 export class PlanifierRdvDto {
   @IsDateString()
-  @IsOptional()
-  dateRDV?: string;
+  @IsNotEmpty()
+  dateRDV: string;
 
   @IsString()
-  @IsOptional()
-  heureDebut?: string;
-
-  @IsString()
-  @IsOptional()
-  salle?: string;
-
-  @IsString()
-  @IsOptional()
-  heureFin?: string;
+  @IsNotEmpty()
+  heureDebut: string;
 
   @IsInt()
   @Min(1)

@@ -145,7 +145,6 @@ export class RdvsController {
         prescripteurId: body.prescripteurId,
         demandeId: body.demandeId ?? null,
         typeEEG: body.typeEEG,
-        salle: body.salle,
         priorite: body.priorite,
         dateRdv: new Date(body.dateRdv),
         heureDebut: body.heureDebut,
@@ -167,7 +166,6 @@ export class RdvsController {
     if (body.heureDebut) data.heureDebut = body.heureDebut;
     if (body.heureFin) data.heureFin = body.heureFin;
     if (body.dureeMinutes) data.dureeMinutes = body.dureeMinutes;
-    if (body.salle) data.salle = body.salle;
     if (body.statut) data.statut = body.statut;
     if (body.renseignementClinique !== undefined)
       data.renseignementClinique = body.renseignementClinique;

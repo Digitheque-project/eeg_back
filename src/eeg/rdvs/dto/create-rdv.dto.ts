@@ -33,10 +33,6 @@ export class CreateRdvDto {
   @IsNotEmpty()
   typeEEG: TypeEEG;
 
-  @IsString()
-  @IsNotEmpty()
-  salle: string;
-
   @IsEnum(NiveauUrgence)
   @IsNotEmpty()
   priorite: NiveauUrgence;

@@ -255,99 +255,28 @@ export class DemandesService {
     return demandeMaj;
   }
 
+  /** "08:30" + 90 → "10:00" */
+  private ajouterMinutes(heureDebut: string, dureeMinutes: number): string {
+    const [h, m] = heureDebut.split(':').map(Number);
+    const total = h * 60 + m + dureeMinutes;
+    const heureFin = Math.floor(total / 60) % 24;
+    const minuteFin = total % 60;
+    return `${String(heureFin).padStart(2, '0')}:${String(minuteFin).padStart(2, '0')}`;
+  }
+
   async planifierRdv(id: string, dto: PlanifierRdvDto, technicienId: string) {
     const d = await this.resolveOrPromote(id);
     if (d.statut !== 'CREEE')
       throw new BadRequestException(`Statut invalide: ${d.statut}`);
 
-    // Si créneau fourni explicitement, l'utiliser directement
-    if (dto.dateRDV && dto.heureDebut && dto.salle) {
-      const dateRdv = new Date(dto.dateRDV);
-      const conflit = await this.prisma.eegRdv.findFirst({
-        where: {
-          dateRdv: dateRdv,
-          heureDebut: dto.heureDebut,
-          salle: dto.salle,
-        },
-      });
-      if (conflit) throw new BadRequestException('Créneau déjà occupé');
-
-      const heureNum = parseInt(dto.heureDebut.split(':')[0]);
-      const heureFin = `${String(heureNum + 1).padStart(2, '0')}:00`;
-
-      await this.prisma.eegRdv.create({
-        data: {
-          patientId: d.patientId,
-          prescripteurId: d.prescripteurId,
-          demandeId: d.id,
-          typeEEG: d.typeEEG,
-          salle: dto.salle,
-          priorite: d.urgence,
-          dateRdv: dateRdv,
-          heureDebut: dto.heureDebut,
-          heureFin: heureFin,
-          dureeMinutes: 60,
-          renseignementClinique: d.motifPrescription,
-        },
-      });
-
-      const demandeMaj = await this.prisma.eegDemande.update({
-        where: { id: d.id },
-        data: { statut: 'PLANIFIEE', dateRDV: dateRdv, technicienId },
-      });
-      this.syncStatutToSource(d.prescriptionSourceId, 'PLANIFIEE');
-      return demandeMaj;
-    }
-
-    const maintenant = new Date();
-    const jPlus2 = new Date(maintenant);
-    jPlus2.setDate(maintenant.getDate() + 2);
-    jPlus2.setHours(0, 0, 0, 0);
-
-    const rdvsExistants = await this.prisma.eegRdv.findMany({
-      where: { dateRdv: { gte: jPlus2 } },
-      select: { dateRdv: true, heureDebut: true, salle: true },
-      orderBy: { dateRdv: 'asc' },
+    const dateRdv = new Date(dto.dateRDV);
+    const conflit = await this.prisma.eegRdv.findFirst({
+      where: { dateRdv, heureDebut: dto.heureDebut },
     });
+    if (conflit) throw new BadRequestException('Créneau déjà occupé');
 
-    const salles = ['Salle 01', 'Salle 02', 'Salle 03'];
-    let dateChoisie: Date | null = null;
-    let heureDebut = '08:00';
-    let salleChoisie = 'Salle 01';
-    let trouve = false;
-
-    for (let j = 0; j < 30 && !trouve; j++) {
-      const date = new Date(jPlus2);
-      date.setDate(jPlus2.getDate() + j);
-      if (date.getDay() === 0 || date.getDay() === 6) continue;
-
-      for (const salle of salles) {
-        for (let h = 8; h < 17 && !trouve; h++) {
-          const debut = `${String(h).padStart(2, '0')}:00`;
-          const occupe = rdvsExistants.some((r) => {
-            if (!r || !r.salle || !r.heureDebut || !r.dateRdv) return false;
-            const rDate = new Date(r.dateRdv).toDateString();
-            return (
-              rDate === date.toDateString() &&
-              r.salle === salle &&
-              r.heureDebut === debut
-            );
-          });
-          if (!occupe) {
-            dateChoisie = new Date(date);
-            heureDebut = debut;
-            salleChoisie = salle;
-            trouve = true;
-          }
-        }
-      }
-    }
-
-    if (!trouve || !dateChoisie)
-      throw new BadRequestException('Aucun créneau disponible trouvé');
-
-    const heureNum = parseInt(heureDebut.split(':')[0]);
-    const fin = `${String(heureNum + 1).padStart(2, '0')}:00`;
+    const dureeMinutes = dto.dureeMinutes ?? 60;
+    const heureFin = this.ajouterMinutes(dto.heureDebut, dureeMinutes);
 
     await this.prisma.eegRdv.create({
       data: {
@@ -355,19 +284,18 @@ export class DemandesService {
         prescripteurId: d.prescripteurId,
         demandeId: d.id,
         typeEEG: d.typeEEG,
-        salle: salleChoisie,
         priorite: d.urgence,
-        dateRdv: dateChoisie,
-        heureDebut,
-        heureFin: fin,
-        dureeMinutes: 60,
+        dateRdv,
+        heureDebut: dto.heureDebut,
+        heureFin,
+        dureeMinutes,
         renseignementClinique: d.motifPrescription,
       },
     });
 
     const demandeMaj = await this.prisma.eegDemande.update({
       where: { id: d.id },
-      data: { statut: 'PLANIFIEE', dateRDV: dateChoisie, technicienId },
+      data: { statut: 'PLANIFIEE', dateRDV: dateRdv, technicienId },
     });
     this.syncStatutToSource(d.prescriptionSourceId, 'PLANIFIEE');
     return demandeMaj;
