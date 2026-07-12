@@ -222,13 +222,12 @@ export class RdvsController {
     if (!rdv) throw new NotFoundException(`RDV ${id} introuvable`);
 
     return this.prisma.$transaction(async (tx) => {
-      // 1. Mettre à jour le statut du RDV
-      const rdvMaj = await tx.eegRdv.update({
-        where: { id },
-        data: { statut: StatutRdv.NON_REALISE },
-      });
-
-      // 2. Répercuter sur la demande liée (garde de non-régression)
+      // 1. Répercuter sur la demande liée (garde de non-régression) et
+      // déterminer si ce RDV doit être délié de sa demande — sinon, la
+      // contrainte unique sur demandeId empêche toute replanification
+      // future (la demande redevient CREEE mais le RDV EN_ATTENTE reste
+      // accroché dessus).
+      let delierDemande = false;
       if (rdv.demandeId && rdv.demande) {
         const statutActuel = rdv.demande.statut as string;
         const rangActuel =
@@ -242,6 +241,7 @@ export class RdvsController {
             where: { id: rdv.demandeId },
             data: { statut: 'CREEE', dateRDV: null },
           });
+          delierDemande = true;
           this.logger.log(
             `RDV ${id} marqué NON_REALISE — demande ${rdv.demandeId} repassée à CREEE`,
           );
@@ -254,7 +254,14 @@ export class RdvsController {
         }
       }
 
-      return rdvMaj;
+      // 2. Mettre à jour le statut du RDV (et le délier si nécessaire)
+      return tx.eegRdv.update({
+        where: { id },
+        data: {
+          statut: StatutRdv.NON_REALISE,
+          ...(delierDemande ? { demandeId: null } : {}),
+        },
+      });
     });
   }
 
@@ -268,13 +275,12 @@ export class RdvsController {
     if (!rdv) throw new NotFoundException(`RDV ${id} introuvable`);
 
     return this.prisma.$transaction(async (tx) => {
-      // 1. Mettre à jour le statut du RDV
-      const rdvMaj = await tx.eegRdv.update({
-        where: { id },
-        data: { statut: StatutRdv.ANNULE },
-      });
-
-      // 2. Répercuter sur la demande liée (garde de non-régression)
+      // 1. Répercuter sur la demande liée (garde de non-régression) et
+      // déterminer si ce RDV doit être délié de sa demande — sinon, la
+      // contrainte unique sur demandeId empêche toute replanification
+      // future (la demande redevient CREEE mais le RDV ANNULE reste
+      // accroché dessus).
+      let delierDemande = false;
       if (rdv.demandeId && rdv.demande) {
         const statutActuel = rdv.demande.statut as string;
         const rangActuel =
@@ -288,6 +294,7 @@ export class RdvsController {
             where: { id: rdv.demandeId },
             data: { statut: 'CREEE', dateRDV: null },
           });
+          delierDemande = true;
           this.logger.log(
             `RDV ${id} annulé — demande ${rdv.demandeId} repassée à CREEE`,
           );
@@ -300,7 +307,14 @@ export class RdvsController {
         }
       }
 
-      return rdvMaj;
+      // 2. Mettre à jour le statut du RDV (et le délier si nécessaire)
+      return tx.eegRdv.update({
+        where: { id },
+        data: {
+          statut: StatutRdv.ANNULE,
+          ...(delierDemande ? { demandeId: null } : {}),
+        },
+      });
     });
   }
 
