@@ -267,8 +267,14 @@ export class DemandesService {
         'Impossible de planifier un RDV le week-end',
       );
     }
+    // Un RDV annulé ou non réalisé n'occupe plus son créneau — seul un RDV
+    // encore en attente ou déjà réalisé constitue un vrai conflit.
     const conflit = await this.prisma.eegRdv.findFirst({
-      where: { dateRdv, heureDebut: dto.heureDebut },
+      where: {
+        dateRdv,
+        heureDebut: dto.heureDebut,
+        statut: { notIn: ['ANNULE', 'NON_REALISE'] },
+      },
     });
     if (conflit) throw new BadRequestException('Créneau déjà occupé');
 
