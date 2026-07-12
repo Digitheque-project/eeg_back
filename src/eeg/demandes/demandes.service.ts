@@ -124,7 +124,20 @@ export class DemandesService {
     );
     const nouvelles = prescriptions.filter((p) => !sourceIdsConnus.has(p.id));
     for (const p of nouvelles) {
-      await this.promoteToLocal(p);
+      const demande = await this.promoteToLocal(p);
+      // La demande arrive sous forme de notification — c'est ainsi que le
+      // technicien apprend qu'une nouvelle prescription EEG est arrivée,
+      // sans avoir à surveiller activement le worklist.
+      await this.prisma.eegNotification.create({
+        data: {
+          niveau: demande.urgence,
+          type: 'NOUVELLE_DEMANDE',
+          titre: 'Nouvelle demande EEG',
+          message: `${demande.numeroEEG} — ${demande.typeEEG}`,
+          patientId: demande.patientId,
+          demandeId: demande.id,
+        },
+      });
     }
     return nouvelles.length;
   }

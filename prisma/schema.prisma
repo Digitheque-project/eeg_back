@@ -38,6 +38,7 @@ enum StatutRdv {
 enum TypeNotification {
   ALERTE_CRITIQUE
   ALERTE_URGENTE
+  NOUVELLE_DEMANDE
   RAPPORT
   SYSTEME
 }
