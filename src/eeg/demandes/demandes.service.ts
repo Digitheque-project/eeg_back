@@ -5,6 +5,7 @@ import {
 } from '../external/prescription-client.service';
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
@@ -17,6 +18,8 @@ import { ArchiverResultatDto } from './dto/archiver-resultat.dto';
 
 @Injectable()
 export class DemandesService {
+  private readonly logger = new Logger(DemandesService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationService: NotificationExternalService,
@@ -57,26 +60,28 @@ export class DemandesService {
    * si un doublon est créé en concurrence, on retombe sur celui déjà promu.
    */
   private async promoteToLocal(p: PrescriptionEegDto) {
-    // Le service Prescription n'expose qu'un identifiant libre pour le
-    // prescripteur (pas de nom/prénom résolvable) — on l'affiche tel quel
-    // plutôt qu'un placeholder générique qui masquerait qui a prescrit.
-    // Certaines prescriptions arrivent avec prescripteurId vide (donnée
-    // source incomplète) — on leur donne un id/libellé dédié plutôt que de
-    // les faire toutes fusionner sous une même fiche "".
-    const prescripteurId = p.prescripteurId || `INCONNU-${p.id}`;
-    const prescripteurNom = p.prescripteurId || 'Prescripteur non renseigné';
-    await this.prisma.utilisateur.upsert({
-      where: { id: prescripteurId },
-      update: {},
-      create: {
-        id: prescripteurId,
-        nom: prescripteurNom,
-        prenom: 'Externe',
-        email: `prescripteur-${prescripteurId}@chu.local`,
-        role: 'TECHNICIEN',
-        actif: true,
-      },
-    });
+    this.logger.log(
+      `📥 Prescription reçue — typeEEG: ${p.typeEEG}, prescripteurId: ${p.prescripteurId || '(vide)'}`,
+    );
+
+    let prescripteurId = p.prescripteurId;
+    if (!prescripteurId) {
+      const defaultPrescripteur =
+        await this.prisma.utilisateur.findFirst({
+          where: { role: 'CHEF_SERVICE', actif: true },
+        });
+      if (defaultPrescripteur) {
+        prescripteurId = defaultPrescripteur.id;
+        this.logger.log(
+          `👤 Prescripteur null → utilisation du CHEF_SERVICE par défaut: ${defaultPrescripteur.prenom} ${defaultPrescripteur.nom} (${defaultPrescripteur.id})`,
+        );
+      } else {
+        prescripteurId = `INCONNU-${p.id}`;
+        this.logger.warn(
+          `⚠️ Aucun CHEF_SERVICE actif trouvé, prescripteur fallback: ${prescripteurId}`,
+        );
+      }
+    }
 
     try {
       return await this.prisma.eegDemande.create({
@@ -125,9 +130,9 @@ export class DemandesService {
     const nouvelles = prescriptions.filter((p) => !sourceIdsConnus.has(p.id));
     for (const p of nouvelles) {
       const demande = await this.promoteToLocal(p);
-      // La demande arrive sous forme de notification — c'est ainsi que le
-      // technicien apprend qu'une nouvelle prescription EEG est arrivée,
-      // sans avoir à surveiller activement le worklist.
+      this.logger.log(
+        `🔔 Création notification locale pour ${demande.numeroEEG} (typeEEG: ${demande.typeEEG})`,
+      );
       await this.prisma.eegNotification.create({
         data: {
           niveau: demande.urgence,
