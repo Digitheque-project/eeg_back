@@ -258,6 +258,22 @@ export class DemandesService {
   }
 
   // ─── Worklist ─────────────────────────────────────────────────────
+  // Détermine si une demande a un prescripteur renseigné (local ou externe).
+  private aUnPrescripteur(d: {
+    prescripteurId?: string | null;
+    prescripteurExterneNom?: string | null;
+    prescripteurExternePrenom?: string | null;
+    prescripteur?: { id: string } | null;
+    prescripteurNomManuel?: string | null;
+    prescripteurPrenomManuel?: string | null;
+  }): boolean {
+    if (d.prescripteurId) return true;
+    if (d.prescripteurExterneNom || d.prescripteurExternePrenom) return true;
+    if (d.prescripteur) return true;
+    if (d.prescripteurNomManuel || d.prescripteurPrenomManuel) return true;
+    return false;
+  }
+
   async getWorklist(role: string) {
     if (!['TECHNICIEN', 'CHEF_SERVICE', 'MAJOR_SERVICE'].includes(role)) {
       return { message: 'Rôle non reconnu' };
@@ -282,10 +298,16 @@ export class DemandesService {
       .map((d) => this.buildVirtualDemande(d));
 
     const localesActives = locales.filter(
-      (d) => !['RESULTAT_DISPONIBLE', 'ANNULEE'].includes(d.statut),
+      (d) =>
+        !['RESULTAT_DISPONIBLE', 'ANNULEE'].includes(d.statut) &&
+        this.aUnPrescripteur(d),
     );
 
-    const toutes = [...localesActives, ...virtuelles].sort(
+    const virtuellesAvecPrescripteur = virtuelles.filter((d) =>
+      this.aUnPrescripteur(d),
+    );
+
+    const toutes = [...localesActives, ...virtuellesAvecPrescripteur].sort(
       (a, b) =>
         new Date(b.dateCreation).getTime() - new Date(a.dateCreation).getTime(),
     );
