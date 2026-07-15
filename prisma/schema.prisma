@@ -114,24 +114,28 @@ model Utilisateur {
 }
 
 model EegDemande {
-  id                   String        @id @default(uuid())
-  numeroEEG            String        @unique
-  patientId            String
-  prescripteurId       String
-  technicienId         String?
-  typeEEG              TypeEEG
-  urgence              NiveauUrgence
-  motifPrescription    String
-  statut               StatutDemande @default(CREEE)
-  episodeSoinsId       String
-  prescriptionSourceId String?       @unique
-  dateCreation         DateTime      @default(now())
-  dateRDV              DateTime?
-  dateRealisation      DateTime?
-  dateValidation       DateTime?
-  motifAnnulation      String?
+  id                       String        @id @default(uuid())
+  numeroEEG                String        @unique
+  patientId                String
+  prescripteurId           String?
+  technicienId             String?
+  typeEEG                  TypeEEG
+  urgence                  NiveauUrgence
+  motifPrescription        String
+  statut                   StatutDemande @default(CREEE)
+  episodeSoinsId           String
+  prescriptionSourceId     String?       @unique
+  prescriptionParentId     String?
+  prescripteurExterneNom    String?
+  prescripteurExternePrenom String?
+  prescripteurExterne       Boolean     @default(false)
+  dateCreation              DateTime      @default(now())
+  dateRDV                  DateTime?
+  dateRealisation          DateTime?
+  dateValidation           DateTime?
+  motifAnnulation          String?
 
-  prescripteur  Utilisateur       @relation("prescripteur", fields: [prescripteurId], references: [id])
+  prescripteur  Utilisateur?      @relation("prescripteur", fields: [prescripteurId], references: [id], onDelete: SetNull)
   resultat      EegResultat?
   notifications EegNotification[]
   audits        EegAudit[]
@@ -143,7 +147,7 @@ model EegDemande {
 model EegRdv {
   id                      String        @id @default(uuid())
   patientId               String
-  prescripteurId          String
+  prescripteurId          String?
   demandeId               String?       @unique
   typeEEG                 String
   // Une seule salle pour l'instant (pas de sélection utilisateur) — le
@@ -161,7 +165,7 @@ model EegRdv {
   technicienRealisateurId String?
   createdAt               DateTime      @default(now())
 
-  prescripteur  Utilisateur       @relation("prescripteurRdv", fields: [prescripteurId], references: [id])
+  prescripteur  Utilisateur?      @relation("prescripteurRdv", fields: [prescripteurId], references: [id], onDelete: SetNull)
   demande       EegDemande?       @relation(fields: [demandeId], references: [id])
   notifications EegNotification[]
 

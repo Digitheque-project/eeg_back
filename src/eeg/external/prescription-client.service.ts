@@ -3,20 +3,82 @@ import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { getErrorMessage } from '../../common/utils/error.util';
 
-export interface PrescriptionEegDto {
+// ─── Shape réelle retournée par GET /prescriptions/eeg ──────────────
+// Le endpoint renvoie des prescriptions parents, chacune contenant un
+// tableau demandes[] de demandes EEG individuelles.
+export interface PrescriptionEegRawDto {
   id: string;
   patientId: string;
   prescripteurId: string;
-  urgence?: 'NORMALE' | 'URGENTE' | 'STAT';
+  prescripteurNomManuel?: string;
+  prescripteurPrenomManuel?: string;
+  prescripteurExterne?: boolean;
+  urgence?: string;
   alertes?: string;
-  renseignements: string;
-  typeEEG: 'STANDARD' | 'SOMMEIL' | 'AMBULATOIRE' | 'VIDEO_EEG';
+  renseignements?: string;
   remarques?: string;
   chuId?: string;
   serviceIdSource?: string;
   serviceIdDest?: string;
   createdAt?: string;
-  [key: string]: unknown;
+  demandes: PrescriptionDemandeeRaw[];
+}
+
+export interface PrescriptionDemandeeRaw {
+  id: string;
+  prescriptionId?: string;
+  typeEEG: string;
+  statut?: string;
+  motifRefus?: string;
+}
+
+// ─── Forme aplatie consommée par eeg_back ──────────────────────────
+// Chaque élément de demandes[] est aplati en un objet portant les champs
+// communs de la prescription parente + les champs propres de la demande.
+export interface PrescriptionEegDemandeFlat {
+  /** ID de la demande individuelle (prescription_back.demandes[].id) */
+  id: string;
+  /** ID de la prescription parente (prescription_back.prescription.id) */
+  prescriptionParentId: string;
+  patientId: string;
+  prescripteurId: string;
+  prescripteurNomManuel?: string;
+  prescripteurPrenomManuel?: string;
+  prescripteurExterne?: boolean;
+  urgence?: 'NORMALE' | 'URGENTE' | 'STAT';
+  renseignements?: string;
+  alertes?: string;
+  remarques?: string;
+  typeEEG: 'STANDARD' | 'SOMMEIL' | 'AMBULATOIRE' | 'VIDEO_EEG';
+  chuId?: string;
+  serviceIdSource?: string;
+  serviceIdDest?: string;
+  createdAt?: string;
+}
+
+function flattenPrescriptions(
+  raw: PrescriptionEegRawDto[],
+): PrescriptionEegDemandeFlat[] {
+  return raw.flatMap((rx) =>
+    (rx.demandes ?? []).map((d) => ({
+      id: d.id,
+      prescriptionParentId: d.prescriptionId ?? rx.id,
+      patientId: rx.patientId,
+      prescripteurId: rx.prescripteurId,
+      prescripteurNomManuel: rx.prescripteurNomManuel,
+      prescripteurPrenomManuel: rx.prescripteurPrenomManuel,
+      prescripteurExterne: rx.prescripteurExterne,
+      urgence: rx.urgence as PrescriptionEegDemandeFlat['urgence'],
+      renseignements: rx.renseignements,
+      alertes: rx.alertes,
+      remarques: rx.remarques,
+      typeEEG: d.typeEEG as PrescriptionEegDemandeFlat['typeEEG'],
+      chuId: rx.chuId,
+      serviceIdSource: rx.serviceIdSource,
+      serviceIdDest: rx.serviceIdDest,
+      createdAt: rx.createdAt,
+    })),
+  );
 }
 
 @Injectable()
@@ -36,23 +98,26 @@ export class PrescriptionClientService {
   }
 
   /**
-   * List EEG prescriptions destined for this service.
-   * Returns [] on error — never throws (same defensive pattern as
-   * AccueilClientService/ChuClientService).
+   * Liste les demandes EEG individuelles (aplaties) destinées à ce service.
+   * Returns [] on error — never throws.
    */
-  async listEegPrescriptions(
+  async listEegDemandes(
     serviceIdDest: string = this.serviceId,
     chuId: string = this.chuId,
-  ): Promise<PrescriptionEegDto[]> {
+  ): Promise<PrescriptionEegDemandeFlat[]> {
     try {
       const response = await firstValueFrom(
-        this.httpService.get<PrescriptionEegDto[]>(`${this.baseUrl}/eeg`, {
-          params: { serviceIdDest, chuId },
-          timeout: 20000,
-          headers: { 'Content-Type': 'application/json' },
-        }),
+        this.httpService.get<PrescriptionEegRawDto[]>(
+          `${this.baseUrl}/eeg`,
+          {
+            params: { serviceIdDest, chuId },
+            timeout: 20000,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
       );
-      return response.data ?? [];
+
+      return flattenPrescriptions(response.data ?? []);
     } catch (error) {
       this.logger.warn(
         `Failed to list EEG prescriptions: ${getErrorMessage(error)}`,
@@ -62,38 +127,44 @@ export class PrescriptionClientService {
   }
 
   /**
-   * The Prescription service exposes no GET /:id — find by id within the
-   * list destined for this service. Returns null if not found or unreachable.
+   * Trouve une demande EEG individuelle par son ID dans la liste aplatie.
+   * Returns null if not found or unreachable.
    */
-  async findEegPrescriptionById(
+  async findDemandeEegById(
     id: string,
-  ): Promise<PrescriptionEegDto | null> {
-    const prescriptions = await this.listEegPrescriptions();
-    return prescriptions.find((p) => p.id === id) ?? null;
+  ): Promise<PrescriptionEegDemandeFlat | null> {
+    const demandes = await this.listEegDemandes();
+    return demandes.find((d) => d.id === id) ?? null;
   }
 
   /**
-   * Reflects an EEG-side status change back onto the source prescription so
-   * the prescripteur can see it (e.g. the reason a refusal/cancellation was
-   * made — stored there as `motifRefus`). Defensive — never throws, since a
-   * failed sync must not block the local EEG workflow.
+   * Répercute un changement de statut EEG sur la demande individuelle
+   * dans prescription_back. Le endpoint cible identifie la demande par
+   * l'id de la prescription parente + l'id de la demande.
+   * Defensive — never throws.
    */
-  async updateStatut(
+  async updateDemandeStatut(
     prescriptionId: string,
+    demandeId: string,
     statut: string,
     motif?: string,
   ): Promise<void> {
     try {
       await firstValueFrom(
         this.httpService.put(
-          `${this.baseUrl}/eeg/${prescriptionId}/statut`,
+          `${this.baseUrl}/eeg/${prescriptionId}/demandes/${demandeId}/statut`,
           { statut, ...(motif ? { motif } : {}) },
-          { timeout: 20000, headers: { 'Content-Type': 'application/json' } },
+          {
+            timeout: 20000,
+            headers: { 'Content-Type': 'application/json' },
+          },
         ),
       );
     } catch (error) {
       this.logger.warn(
-        `Failed to sync statut ${statut} for prescription ${prescriptionId}: ${getErrorMessage(error)}`,
+        `Failed to sync statut ${statut} for ` +
+          `prescription ${prescriptionId}/demande ${demandeId}: ` +
+          getErrorMessage(error),
       );
     }
   }

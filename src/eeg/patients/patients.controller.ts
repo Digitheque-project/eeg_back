@@ -49,7 +49,7 @@ export class PatientsController {
         distinct: ['patientId'],
         select: { patientId: true },
       }),
-      this.prescriptionClient.listEegPrescriptions(),
+      this.prescriptionClient.listEegDemandes(),
     ]);
     const idsAutorises = new Set([
       ...demandesLocales.map((d) => d.patientId),

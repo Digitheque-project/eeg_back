@@ -1,7 +1,7 @@
 import { NotificationExternalService } from '../external/notification-external.service';
 import {
   PrescriptionClientService,
-  PrescriptionEegDto,
+  PrescriptionEegDemandeFlat,
 } from '../external/prescription-client.service';
 import {
   Injectable,
@@ -27,25 +27,114 @@ export class DemandesService {
     private readonly prescriptionClient: PrescriptionClientService,
   ) {}
 
-  /**
-   * Une prescription CREEE tant qu'aucun technicien n'a agi dessus n'est
-   * jamais stockée localement : elle est représentée à la volée depuis le
-   * service Prescription (source de vérité). Elle apparaît/disparaît donc
-   * immédiatement selon ce que ce service renvoie.
-   */
-  private buildVirtualDemande(p: PrescriptionEegDto) {
+  // ─── Prescripteur par défaut (CHEF_SERVICE actif) ─────────────────
+  private async getDefaultPrescripteurId(): Promise<string | null> {
+    const u = await this.prisma.utilisateur.findFirst({
+      where: { role: 'CHEF_SERVICE', actif: true },
+    });
+    return u?.id ?? null;
+  }
+
+  // ─── Résolution prescripteur externe (Option B) ───────────────────
+  // Trois chemins possibles :
+  //   A) prescripteurExterne=true + l'id n'existe pas localement → snapshot
+  //   B) prescripteurExterne=false (ou absent) + l'id existe localement → réutilise l'id local
+  //   C) prescripteurId absent/null → fallback CHEF_SERVICE
+  //
+  // Cas particulier : prescripteurExterne=true mais prescripteurNomManuel=null
+  // → on ne peut pas afficher de nom, on laisse les snapshot à null.
+  // Le frontend affichera "Non renseigné".
+  private async resolvePrescripteurId(
+    externalId: string | undefined,
+    prescripteurExterne: boolean | undefined,
+    externalNomManuel?: string,
+    externalPrenomManuel?: string,
+  ): Promise<{
+    prescripteurId: string | null;
+    prescripteurExterneNom: string | null;
+    prescripteurExternePrenom: string | null;
+  }> {
+    // ── Cas C : pas d'id du tout → CHEF_SERVICE par défaut ──────────
+    if (!externalId) {
+      const fallbackId = await this.getDefaultPrescripteurId();
+      if (fallbackId) {
+        this.logger.log(
+          `👤 Prescripteur null → CHEF_SERVICE par défaut (${fallbackId})`,
+        );
+      } else {
+        this.logger.warn(
+          '⚠️ Aucun prescripteur et aucun CHEF_SERVICE actif trouvé',
+        );
+      }
+      return {
+        prescripteurId: fallbackId,
+        prescripteurExterneNom: null,
+        prescripteurExternePrenom: null,
+      };
+    }
+
+    // ── Cas A : prescripteur externe → snapshot ─────────────────────
+    if (prescripteurExterne) {
+      this.logger.log(
+        `👤 Prescripteur externe ${externalId} → snapshot` +
+          (externalNomManuel
+            ? ` (${externalNomManuel} ${externalPrenomManuel ?? ''})`
+            : ' (aucun nom)'),
+      );
+      return {
+        prescripteurId: null,
+        prescripteurExterneNom: externalNomManuel ?? null,
+        prescripteurExternePrenom: externalPrenomManuel ?? null,
+      };
+    }
+
+    // ── Cas B : id fourni, pas marqué externe → cherche localement ──
+    const local = await this.prisma.utilisateur.findUnique({
+      where: { id: externalId },
+    });
+    if (local) {
+      this.logger.log(
+        `👤 Prescripteur local trouvé: ${local.prenom} ${local.nom} (${local.id})`,
+      );
+      return {
+        prescripteurId: local.id,
+        prescripteurExterneNom: null,
+        prescripteurExternePrenom: null,
+      };
+    }
+
+    // ── Cas B (fallback) : id fourni mais absent de la table locale ─
+    // Cela ne devrait pas arriver si prescripteurExterne=true, mais par
+    // sécurité on traite ça comme un externe sans nom.
+    this.logger.warn(
+      `⚠️ prescripteurId ${externalId} absent de la table locale, ` +
+        `prescripteurExterne=false → traitement comme externe sans nom`,
+    );
+    return {
+      prescripteurId: null,
+      prescripteurExterneNom: null,
+      prescripteurExternePrenom: null,
+    };
+  }
+
+  // ─── Construction d'une demande virtuelle (non persistée) ──────────
+  private buildVirtualDemande(p: PrescriptionEegDemandeFlat) {
     return {
       id: p.id,
       numeroEEG: `PRESC-${p.id.slice(0, 8).toUpperCase()}`,
       patientId: p.patientId,
-      prescripteurId: p.prescripteurId,
+      prescripteurId: null as string | null,
+      prescripteurExterneNom: p.prescripteurNomManuel ?? null,
+      prescripteurExternePrenom: p.prescripteurPrenomManuel ?? null,
+      prescripteurExterne: p.prescripteurExterne ?? false,
       technicienId: null as string | null,
       typeEEG: p.typeEEG,
       urgence: p.urgence ?? 'NORMALE',
-      motifPrescription: p.renseignements,
+      motifPrescription: p.renseignements ?? '',
       statut: 'CREEE' as const,
       episodeSoinsId: p.chuId ?? '',
       prescriptionSourceId: p.id,
+      prescriptionParentId: p.prescriptionParentId,
       dateCreation: p.createdAt ? new Date(p.createdAt) : new Date(),
       dateRDV: null as Date | null,
       dateRealisation: null as Date | null,
@@ -54,46 +143,37 @@ export class DemandesService {
     };
   }
 
-  /**
-   * Crée l'enregistrement local au moment (et seulement au moment) où un
-   * technicien agit sur une prescription encore virtuelle. Idempotent :
-   * si un doublon est créé en concurrence, on retombe sur celui déjà promu.
-   */
-  private async promoteToLocal(p: PrescriptionEegDto) {
+  // ─── Promotion vers la base locale ────────────────────────────────
+  private async promoteToLocal(p: PrescriptionEegDemandeFlat) {
     this.logger.log(
-      `📥 Prescription reçue — typeEEG: ${p.typeEEG}, prescripteurId: ${p.prescripteurId || '(vide)'}`,
+      `📥 Demande reçue — id: ${p.id}, typeEEG: ${p.typeEEG}, ` +
+        `prescripteurId: ${p.prescripteurId || '(vide)'}, ` +
+        `externe: ${p.prescripteurExterne}, ` +
+        `parent: ${p.prescriptionParentId}`,
     );
 
-    let prescripteurId = p.prescripteurId;
-    if (!prescripteurId) {
-      const defaultPrescripteur =
-        await this.prisma.utilisateur.findFirst({
-          where: { role: 'CHEF_SERVICE', actif: true },
-        });
-      if (defaultPrescripteur) {
-        prescripteurId = defaultPrescripteur.id;
-        this.logger.log(
-          `👤 Prescripteur null → utilisation du CHEF_SERVICE par défaut: ${defaultPrescripteur.prenom} ${defaultPrescripteur.nom} (${defaultPrescripteur.id})`,
-        );
-      } else {
-        prescripteurId = `INCONNU-${p.id}`;
-        this.logger.warn(
-          `⚠️ Aucun CHEF_SERVICE actif trouvé, prescripteur fallback: ${prescripteurId}`,
-        );
-      }
-    }
+    const resolved = await this.resolvePrescripteurId(
+      p.prescripteurId,
+      p.prescripteurExterne,
+      p.prescripteurNomManuel,
+      p.prescripteurPrenomManuel,
+    );
 
     try {
       return await this.prisma.eegDemande.create({
         data: {
           patientId: p.patientId,
-          prescripteurId,
+          prescripteurId: resolved.prescripteurId,
+          prescripteurExterneNom: resolved.prescripteurExterneNom,
+          prescripteurExternePrenom: resolved.prescripteurExternePrenom,
+          prescripteurExterne: p.prescripteurExterne ?? false,
           typeEEG: p.typeEEG,
           urgence: p.urgence || 'NORMALE',
-          motifPrescription: p.renseignements,
+          motifPrescription: p.renseignements ?? '',
           episodeSoinsId: p.chuId || `EXTERNAL-${Date.now()}`,
           numeroEEG: `EEG-${Date.now()}`,
           prescriptionSourceId: p.id,
+          prescriptionParentId: p.prescriptionParentId,
         },
         include: { rdv: true },
       });
@@ -109,29 +189,29 @@ export class DemandesService {
     }
   }
 
-  /**
-   * Matérialise en local toute prescription EEG pas encore promue — appelée
-   * par EegSchedulerService pour que la base locale reste la source de
-   * vérité pour les rapports et les alertes (elles ne portent que sur des
-   * demandes locales), sans attendre qu'un technicien agisse dessus.
-   */
+  // ─── Sync des prescriptions en attente ────────────────────────────
   async syncPendingPrescriptions(): Promise<number> {
-    const [locales, prescriptions] = await Promise.all([
+    const [locales, flatDemandes] = await Promise.all([
       this.prisma.eegDemande.findMany({
-        select: { prescriptionSourceId: true },
+        select: { prescriptionParentId: true },
       }),
-      this.prescriptionClient.listEegPrescriptions(),
+      this.prescriptionClient.listEegDemandes(),
     ]);
-    const sourceIdsConnus = new Set(
+
+    const parentIdsConnus = new Set(
       locales
-        .map((d) => d.prescriptionSourceId)
+        .map((d) => d.prescriptionParentId)
         .filter((v): v is string => !!v),
     );
-    const nouvelles = prescriptions.filter((p) => !sourceIdsConnus.has(p.id));
-    for (const p of nouvelles) {
-      const demande = await this.promoteToLocal(p);
+
+    const nouvelles = flatDemandes.filter(
+      (d) => !parentIdsConnus.has(d.prescriptionParentId),
+    );
+
+    for (const d of nouvelles) {
+      const demande = await this.promoteToLocal(d);
       this.logger.log(
-        `🔔 Création notification locale pour ${demande.numeroEEG} (typeEEG: ${demande.typeEEG})`,
+        `🔔 Notification locale pour ${demande.numeroEEG} (typeEEG: ${demande.typeEEG})`,
       );
       await this.prisma.eegNotification.create({
         data: {
@@ -147,29 +227,23 @@ export class DemandesService {
     return nouvelles.length;
   }
 
-  /**
-   * Répercute un changement de statut EEG sur la prescription source, pour
-   * que le prescripteur voie l'évolution (et le motif de refus/annulation)
-   * dans le service Prescription. Fire-and-forget — un échec de sync ne doit
-   * jamais bloquer le workflow EEG local.
-   */
+  // ─── Répercussion statut vers prescription_back ───────────────────
   private syncStatutToSource(
-    prescriptionSourceId: string | null,
+    prescriptionParentId: string | null,
+    demandeSourceId: string | null,
     statut: string,
     motif?: string,
   ) {
-    if (!prescriptionSourceId) return;
-    void this.prescriptionClient.updateStatut(
-      prescriptionSourceId,
+    if (!prescriptionParentId || !demandeSourceId) return;
+    void this.prescriptionClient.updateDemandeStatut(
+      prescriptionParentId,
+      demandeSourceId,
       statut,
       motif,
     );
   }
 
-  /**
-   * Résout un id vers une demande locale (déjà promue) ou, s'il s'agit d'un
-   * id de prescription encore virtuelle, la promeut à la demande.
-   */
+  // ─── Résolution ID → demande locale ou promotion ──────────────────
   private async resolveOrPromote(id: string) {
     const local = await this.prisma.eegDemande.findFirst({
       where: { OR: [{ id }, { prescriptionSourceId: id }] },
@@ -177,38 +251,36 @@ export class DemandesService {
     });
     if (local) return local;
 
-    const prescription =
-      await this.prescriptionClient.findEegPrescriptionById(id);
-    if (!prescription) throw new NotFoundException(`Demande ${id} introuvable`);
-    return this.promoteToLocal(prescription);
+    const demande =
+      await this.prescriptionClient.findDemandeEegById(id);
+    if (!demande) throw new NotFoundException(`Demande ${id} introuvable`);
+    return this.promoteToLocal(demande);
   }
 
+  // ─── Worklist ─────────────────────────────────────────────────────
   async getWorklist(role: string) {
     if (!['TECHNICIEN', 'CHEF_SERVICE', 'MAJOR_SERVICE'].includes(role)) {
       return { message: 'Rôle non reconnu' };
     }
 
-    const [locales, prescriptions] = await Promise.all([
+    const [locales, flatDemandes] = await Promise.all([
       this.prisma.eegDemande.findMany({
         include: { prescripteur: true, resultat: true, rdv: true },
         orderBy: { dateCreation: 'desc' },
       }),
-      this.prescriptionClient.listEegPrescriptions(),
+      this.prescriptionClient.listEegDemandes(),
     ]);
 
-    const sourceIdsConnus = new Set(
+    const parentIdsConnus = new Set(
       locales
-        .map((d) => d.prescriptionSourceId)
+        .map((d) => d.prescriptionParentId)
         .filter((v): v is string => !!v),
     );
-    const virtuelles = prescriptions
-      .filter((p) => !sourceIdsConnus.has(p.id))
-      .map((p) => this.buildVirtualDemande(p));
 
-    // Un dossier clos (résultat archivé ou demande annulée/refusée) n'a plus
-    // sa place dans le fil de travail — il reste consultable depuis la page
-    // Archives. On l'exclut ici (et non de la requête ci-dessus) pour que la
-    // déduplication par prescriptionSourceId reste correcte.
+    const virtuelles = flatDemandes
+      .filter((d) => !parentIdsConnus.has(d.prescriptionParentId))
+      .map((d) => this.buildVirtualDemande(d));
+
     const localesActives = locales.filter(
       (d) => !['RESULTAT_DISPONIBLE', 'ANNULEE'].includes(d.statut),
     );
@@ -221,6 +293,7 @@ export class DemandesService {
     return { toutes: await this.patientLookup.attachPatientInfoToMany(toutes) };
   }
 
+  // ─── Détail d'une demande ─────────────────────────────────────────
   async getDemandeById(id: string) {
     const local = await this.prisma.eegDemande.findFirst({
       where: { OR: [{ id }, { prescriptionSourceId: id }] },
@@ -228,11 +301,11 @@ export class DemandesService {
     });
     if (local) return this.patientLookup.attachPatientInfo(local);
 
-    const prescription =
-      await this.prescriptionClient.findEegPrescriptionById(id);
-    if (!prescription) throw new NotFoundException(`Demande ${id} introuvable`);
+    const demande =
+      await this.prescriptionClient.findDemandeEegById(id);
+    if (!demande) throw new NotFoundException(`Demande ${id} introuvable`);
     return this.patientLookup.attachPatientInfo(
-      this.buildVirtualDemande(prescription),
+      this.buildVirtualDemande(demande),
     );
   }
 
@@ -245,6 +318,7 @@ export class DemandesService {
     return this.patientLookup.attachPatientInfoToMany(demandes);
   }
 
+  // ─── Actions sur les demandes ─────────────────────────────────────
   async refuserDemande(id: string, motif: string, technicienId: string) {
     if (!motif?.trim()) throw new BadRequestException('Motif obligatoire');
     const d = await this.resolveOrPromote(id);
@@ -254,7 +328,12 @@ export class DemandesService {
       where: { id: d.id },
       data: { statut: 'ANNULEE', motifAnnulation: motif, technicienId },
     });
-    this.syncStatutToSource(d.prescriptionSourceId, 'ANNULEE', motif);
+    this.syncStatutToSource(
+      d.prescriptionParentId,
+      d.prescriptionSourceId,
+      'ANNULEE',
+      motif,
+    );
     return demandeMaj;
   }
 
@@ -270,7 +349,12 @@ export class DemandesService {
       where: { id: d.id },
       data: { statut: 'ANNULEE', motifAnnulation: motif },
     });
-    this.syncStatutToSource(d.prescriptionSourceId, 'ANNULEE', motif);
+    this.syncStatutToSource(
+      d.prescriptionParentId,
+      d.prescriptionSourceId,
+      'ANNULEE',
+      motif,
+    );
     return demandeMaj;
   }
 
@@ -285,8 +369,6 @@ export class DemandesService {
         'Impossible de planifier un RDV le week-end',
       );
     }
-    // Un RDV annulé ou non réalisé n'occupe plus son créneau — seul un RDV
-    // encore en attente ou déjà réalisé constitue un vrai conflit.
     const conflit = await this.prisma.eegRdv.findFirst({
       where: {
         dateRdv,
@@ -299,10 +381,15 @@ export class DemandesService {
     const dureeMinutes = dto.dureeMinutes ?? 60;
     const heureFin = ajouterMinutes(dto.heureDebut, dureeMinutes);
 
+    // EegRdv.prescripteurId est nullable — si la demande n'a pas de
+    // prescripteur local, on utilise le CHEF_SERVICE par défaut.
+    const prescripteurIdRdv =
+      d.prescripteurId ?? (await this.getDefaultPrescripteurId()) ?? '';
+
     await this.prisma.eegRdv.create({
       data: {
         patientId: d.patientId,
-        prescripteurId: d.prescripteurId,
+        prescripteurId: prescripteurIdRdv,
         demandeId: d.id,
         typeEEG: d.typeEEG,
         priorite: d.urgence,
@@ -318,7 +405,11 @@ export class DemandesService {
       where: { id: d.id },
       data: { statut: 'PLANIFIEE', dateRDV: dateRdv, technicienId },
     });
-    this.syncStatutToSource(d.prescriptionSourceId, 'PLANIFIEE');
+    this.syncStatutToSource(
+      d.prescriptionParentId,
+      d.prescriptionSourceId,
+      'PLANIFIEE',
+    );
     return demandeMaj;
   }
 
@@ -331,8 +422,6 @@ export class DemandesService {
       throw new BadRequestException(`Statut invalide: ${d.statut}`);
     }
 
-    // Vérification de la cohérence avec le RDV lié (Phase 4)
-    // Si un RDV est associé à la demande, son statut ne doit pas être ANNULE ou NON_REALISE
     if (d.rdv) {
       const statutRdv = (d.rdv as { statut?: string }).statut;
       if (statutRdv === 'ANNULE' || statutRdv === 'NON_REALISE') {
@@ -341,7 +430,6 @@ export class DemandesService {
         );
       }
     }
-    // Si aucun RDV n'est lié (ex. demande CREEE + STAT), la vérification est ignorée
 
     const demandeMaj = await this.prisma.eegDemande.update({
       where: { id: d.id },
@@ -351,15 +439,14 @@ export class DemandesService {
         technicienId: techId,
       },
     });
-    this.syncStatutToSource(d.prescriptionSourceId, 'EN_COURS');
+    this.syncStatutToSource(
+      d.prescriptionParentId,
+      d.prescriptionSourceId,
+      'EN_COURS',
+    );
     return demandeMaj;
   }
 
-  /**
-   * Le chef de service interprète le résultat et l'archive en une seule action
-   * (plus d'étape de validation séparée). Une notification "résultat disponible"
-   * est envoyée automatiquement — il n'y a plus d'accusé de réception manuel.
-   */
   async archiverResultat(
     id: string,
     compteRendu: ArchiverResultatDto,
@@ -409,9 +496,12 @@ export class DemandesService {
       where: { id },
       data: { statut: 'RESULTAT_DISPONIBLE', dateValidation: new Date() },
     });
-    this.syncStatutToSource(d.prescriptionSourceId, 'RESULTAT_DISPONIBLE');
+    this.syncStatutToSource(
+      d.prescriptionParentId,
+      d.prescriptionSourceId,
+      'RESULTAT_DISPONIBLE',
+    );
 
-    // Notification automatique de résultat disponible (remplace l'ancien accusé de réception manuel)
     this.notificationService
       .sendNotification({
         type: 'RESULTAT_DISPONIBLE',
