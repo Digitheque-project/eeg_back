@@ -42,7 +42,7 @@ async function bootstrap() {
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('eeg/api/docs', app, document, {
+  SwaggerModule.setup('api/docs', app, document, {
     swaggerOptions: {
       persistAuthorization: true,
     },
@@ -52,7 +52,7 @@ async function bootstrap() {
   await app.listen(process.env.PORT || 3001);
   console.log(`🏥 SIH CHUA — Module EEG démarré sur http://localhost:${port}`);
   console.log(
-    `📋 Swagger disponible sur http://localhost:${port}/eeg/api/docs`,
+    `📋 Swagger disponible sur http://localhost:${port}/api/docs`,
   );
 }
 void bootstrap();
