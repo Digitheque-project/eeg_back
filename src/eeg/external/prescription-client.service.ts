@@ -152,12 +152,6 @@ export class PrescriptionClientService {
         `GET /prescriptions/eeg → ${response.data?.length ?? 0} prescription(s) parente(s) reçue(s) ` +
           `(serviceIdDest=${serviceIdDest}, chuId=${chuId})`,
       );
-      // [DIAG TEMPORAIRE] — Affiche tous les champs du 1er élément brut pour
-      // détecter d'éventuels champs patient non déclarés dans PrescriptionEegRawDto.
-      this.logger.debug(
-        'Exemple prescription brute: ' +
-          JSON.stringify(response.data?.[0], null, 2),
-      );
       return flattenPrescriptions(response.data ?? []);
     } catch (error) {
       const status = (error as { response?: { status?: number } }).response?.status;
