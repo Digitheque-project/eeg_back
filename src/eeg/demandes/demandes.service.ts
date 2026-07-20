@@ -177,7 +177,11 @@ export class DemandesService {
         },
         include: { rdv: true },
       });
-    } catch {
+    } catch (error) {
+      this.logger.error(
+        `Échec création EegDemande pour prescription source ${p.id}: ${getErrorMessage(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
       const existant = await this.prisma.eegDemande.findUnique({
         where: { prescriptionSourceId: p.id },
         include: { rdv: true },
