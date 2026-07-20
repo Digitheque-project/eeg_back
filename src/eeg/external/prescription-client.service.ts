@@ -6,21 +6,36 @@ import { getErrorMessage } from '../../common/utils/error.util';
 // ─── Shape réelle retournée par GET /prescriptions/eeg ──────────────
 // Le endpoint renvoie des prescriptions parents, chacune contenant un
 // tableau demandes[] de demandes EEG individuelles.
+// Conforme au Swagger de prescription_back (juillet 2026).
 export interface PrescriptionEegRawDto {
   id: string;
   patientId: string;
   prescripteurId: string;
-  prescripteurNomManuel?: string;
-  prescripteurPrenomManuel?: string;
-  prescripteurExterne?: boolean;
+  /** Nom du médecin prescripteur (peut être vide "") */
+  nomMedecinPrescripteur?: string;
+  // TODO: prescripteurPrenomManuel n'a pas d'équivalent visible dans le
+  // payload réel de prescription_back. Vérifier avec l'équipe prescription_back
+  // si un champ prenomMedecinPrescripteur ou similaire est prévu.
+  /** Numéro d'ordre national du médecin (utile pour identifier un médecin externe) */
+  numeroONM?: string;
   urgence?: string;
   alertes?: string;
   renseignements?: string;
   remarques?: string;
+  aeActuel?: string;
+  agePremiereCrise?: string;
+  dpm?: string;
+  typeCrise?: string;
+  dateDerniereCrise?: string;
   chuId?: string;
   serviceIdSource?: string;
   serviceIdDest?: string;
   createdAt?: string;
+  updatedAt?: string;
+  statutSync?: string | null;
+  syncError?: string | null;
+  syncedAt?: string | null;
+  syncTentatives?: number;
   demandes: PrescriptionDemandeeRaw[];
 }
 
@@ -35,6 +50,8 @@ export interface PrescriptionDemandeeRaw {
 // ─── Forme aplatie consommée par eeg_back ──────────────────────────
 // Chaque élément de demandes[] est aplati en un objet portant les champs
 // communs de la prescription parente + les champs propres de la demande.
+// Les noms de champs ci-dessous sont les noms INTERNES utilisés par
+// demandes.service.ts (buildVirtualDemande, promoteToLocal, aUnPrescripteur).
 export interface PrescriptionEegDemandeFlat {
   /** ID de la demande individuelle (prescription_back.demandes[].id) */
   id: string;
@@ -42,9 +59,17 @@ export interface PrescriptionEegDemandeFlat {
   prescriptionParentId: string;
   patientId: string;
   prescripteurId: string;
+  /** Nom du médecin prescripteur (issu de nomMedecinPrescripteur côté raw) */
   prescripteurNomManuel?: string;
+  // TODO: prescripteurPrenomManuel n'a pas d'équivalent dans le payload
+  // réel de prescription_back. Le champ reste déclaré ici pour compatibilité
+  // avec demandes.service.ts (buildVirtualDemande, aUnPrescripteur) mais
+  // sera toujours undefined tant que prescription_back ne l'ajoute pas.
   prescripteurPrenomManuel?: string;
+  /** Déduit : true si prescripteurId est vide ET nomMedecinPrescripteur renseigné */
   prescripteurExterne?: boolean;
+  /** Numéro d'ordre national du médecin prescripteur */
+  numeroONM?: string;
   urgence?: 'NORMALE' | 'URGENTE' | 'STAT';
   renseignements?: string;
   alertes?: string;
@@ -86,9 +111,10 @@ function flattenPrescriptions(
       prescriptionParentId: d.prescriptionId ?? rx.id,
       patientId: rx.patientId,
       prescripteurId: rx.prescripteurId,
-      prescripteurNomManuel: rx.prescripteurNomManuel,
-      prescripteurPrenomManuel: rx.prescripteurPrenomManuel,
-      prescripteurExterne: rx.prescripteurExterne,
+      prescripteurNomManuel: rx.nomMedecinPrescripteur,
+      prescripteurPrenomManuel: undefined, // TODO: pas de source dans payload réel
+      prescripteurExterne: !rx.prescripteurId && !!rx.nomMedecinPrescripteur,
+      numeroONM: rx.numeroONM,
       urgence: normaliserUrgence(rx.urgence),
       renseignements: rx.renseignements,
       alertes: rx.alertes,
