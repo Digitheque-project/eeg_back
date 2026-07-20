@@ -3,6 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PatientLookupService } from '../patients/patient-lookup.service';
 import { DemandesService } from '../demandes/demandes.service';
+import { ChuClientService } from '../../common/clients/chu-client.service';
 import { getErrorMessage } from '../../common/utils/error.util';
 
 @Injectable()
@@ -13,6 +14,7 @@ export class EegSchedulerService implements OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly patientLookup: PatientLookupService,
     private readonly demandesService: DemandesService,
+    private readonly chuClient: ChuClientService,
   ) {}
 
   // Synchronisation immédiate au démarrage, puis en continu via le cron
@@ -20,6 +22,17 @@ export class EegSchedulerService implements OnModuleInit {
   // veille) peut mettre plusieurs dizaines de secondes à répondre à froid —
   // ça ne doit jamais retarder le démarrage de l'appli ni son health check.
   onModuleInit() {
+    // Vérification au démarrage que EEG_SERVICE_ID pointe bien vers le bon
+    // service dans le registre CHU (diagnostic uniquement, fire-and-forget).
+    void this.chuClient.getMyServiceInfo().then((info) => {
+      if (info) {
+        this.logger.log(`Service EEG résolu : "${info.name}" (id=${info.id})`);
+      } else {
+        this.logger.warn(
+          'Service EEG introuvable dans le registre CHU — vérifier EEG_SERVICE_ID',
+        );
+      }
+    });
     void this.synchroniserPrescriptions();
   }
 
@@ -32,9 +45,7 @@ export class EegSchedulerService implements OnModuleInit {
   async synchroniserPrescriptions() {
     try {
       const nb = await this.demandesService.syncPendingPrescriptions();
-      if (nb > 0) {
-        this.logger.log(`${nb} nouvelle(s) prescription(s) synchronisée(s)`);
-      }
+      this.logger.log(`Sync prescriptions : ${nb} nouvelle(s) (sur N reçues)`);
     } catch (err) {
       this.logger.warn(
         `Échec de synchronisation des prescriptions: ${getErrorMessage(err)}`,

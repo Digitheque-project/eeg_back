@@ -127,6 +127,10 @@ export class PrescriptionClientService {
         ),
       );
 
+      this.logger.log(
+        `GET /prescriptions/eeg → ${response.data?.length ?? 0} prescription(s) parente(s) reçue(s) ` +
+          `(serviceIdDest=${serviceIdDest}, chuId=${chuId})`,
+      );
       return flattenPrescriptions(response.data ?? []);
     } catch (error) {
       const status = (error as { response?: { status?: number } }).response?.status;
