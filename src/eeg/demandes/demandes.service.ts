@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PatientLookupService } from '../patients/patient-lookup.service';
+import { UserClientService } from '../../common/clients/user-client.service';
 import { getErrorMessage } from '../../common/utils/error.util';
 import { estWeekend, ajouterMinutes } from '../../common/utils/date.util';
 import { PlanifierRdvDto } from './dto/planifier-rdv.dto';
@@ -25,6 +26,7 @@ export class DemandesService {
     private readonly notificationService: NotificationExternalService,
     private readonly patientLookup: PatientLookupService,
     private readonly prescriptionClient: PrescriptionClientService,
+    private readonly userClient: UserClientService,
   ) {}
 
   // ─── Prescripteur par défaut (CHEF_SERVICE actif) ─────────────────
@@ -36,14 +38,11 @@ export class DemandesService {
   }
 
   // ─── Résolution prescripteur externe (Option B) ───────────────────
-  // Trois chemins possibles :
-  //   A) prescripteurExterne=true + l'id n'existe pas localement → snapshot
-  //   B) prescripteurExterne=false (ou absent) + l'id existe localement → réutilise l'id local
+  // Quatre chemins possibles :
+  //   A) prescripteurExterne=true + nom manuel → snapshot nom/prénom
+  //   B) prescripteurExterne=false + id trouvé localement → réutilise l'id local
   //   C) prescripteurId absent/null → fallback CHEF_SERVICE
-  //
-  // Cas particulier : prescripteurExterne=true mais prescripteurNomManuel=null
-  // → on ne peut pas afficher de nom, on laisse les snapshot à null.
-  // Le frontend affichera "Non renseigné".
+  //   D) prescripteurExterne=false + id absent localement → appel user-services + upsert
   private async resolvePrescripteurId(
     externalId: string | undefined,
     prescripteurExterne: boolean | undefined,
@@ -103,12 +102,45 @@ export class DemandesService {
       };
     }
 
-    // ── Cas B (fallback) : id fourni mais absent de la table locale ─
-    // Cela ne devrait pas arriver si prescripteurExterne=true, mais par
-    // sécurité on traite ça comme un externe sans nom.
+    // ── Cas D : id fourni mais absent localement → appel user-services ─
+    this.logger.log(
+      `👤 Prescripteur ${externalId} absent localement, appel user-services…`,
+    );
+    const remoteUser = await this.userClient.getUserById(externalId);
+    if (remoteUser) {
+      // Upsert dans la table locale pour les prochaines fois
+      const upserted = await this.prisma.utilisateur.upsert({
+        where: { id: remoteUser.id },
+        update: {
+          nom: remoteUser.name,
+          prenom: remoteUser.firstname ?? '',
+          email: remoteUser.email ?? '',
+          telephone: remoteUser.phone ?? null,
+          matricule: remoteUser.matricule ?? null,
+        },
+        create: {
+          id: remoteUser.id,
+          nom: remoteUser.name,
+          prenom: remoteUser.firstname ?? '',
+          email: remoteUser.email ?? '',
+          telephone: remoteUser.phone ?? null,
+          matricule: remoteUser.matricule ?? null,
+          role: 'TECHNICIEN',
+        },
+      });
+      this.logger.log(
+        `👤 Prescripteur upserté depuis user-services: ${upserted.prenom} ${upserted.nom} (${upserted.id})`,
+      );
+      return {
+        prescripteurId: upserted.id,
+        prescripteurExterneNom: null,
+        prescripteurExternePrenom: null,
+      };
+    }
+
+    // ── Fallback : introuvable partout → prescripteur sans nom ──────
     this.logger.warn(
-      `⚠️ prescripteurId ${externalId} absent de la table locale, ` +
-        `prescripteurExterne=false → traitement comme externe sans nom`,
+      `⚠️ prescripteurId ${externalId} introuvable (local + user-services)`,
     );
     return {
       prescripteurId: null,

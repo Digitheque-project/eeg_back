@@ -21,6 +21,7 @@ export interface NormalizedPatient {
   prenom: string;
   age: number | null;
   sexe: 'M' | 'F' | null;
+  priseEnChargeId: string | null;
 }
 
 export interface UpdatePatientPayload {
@@ -62,6 +63,7 @@ export class AccueilClientService {
       prenom: raw.prenom ?? '',
       age: this.calculateAge(raw.dateNaissance),
       sexe: raw.sexe === 'MALE' ? 'M' : raw.sexe === 'FEMALE' ? 'F' : null,
+      priseEnChargeId: (raw as any).priseEnChargeId ?? null,
     };
   }
 

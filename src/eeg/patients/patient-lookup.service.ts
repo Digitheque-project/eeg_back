@@ -1,6 +1,10 @@
 import { PrismaService } from '../../prisma/prisma.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { AccueilClientService } from './accueil-client.service';
+import {
+  PriseEnChargeClientService,
+  PriseEnChargeDto,
+} from '../../common/clients/prise-en-charge-client.service';
 
 export interface PatientInfo {
   nom: string | null;
@@ -8,6 +12,7 @@ export interface PatientInfo {
   age: number | null;
   sexe: string | null;
   idDossier: string | null;
+  priseEnCharge: PriseEnChargeDto | null;
   source: 'ACCUEIL' | 'FALLBACK';
 }
 
@@ -25,6 +30,7 @@ export class PatientLookupService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly accueilClient: AccueilClientService,
+    private readonly priseEnChargeClient: PriseEnChargeClientService,
   ) {}
 
   /**
@@ -41,12 +47,19 @@ export class PatientLookupService {
       await this.accueilClient.getPatientByExternalId(patientId);
 
     if (accueilPatient) {
+      let priseEnCharge: PriseEnChargeDto | null = null;
+      if (accueilPatient.priseEnChargeId) {
+        priseEnCharge = await this.priseEnChargeClient.getPriseEnCharge(
+          accueilPatient.priseEnChargeId,
+        );
+      }
       return {
         nom: accueilPatient.nom || null,
         prenom: accueilPatient.prenom || null,
         age: accueilPatient.age,
         sexe: accueilPatient.sexe,
         idDossier,
+        priseEnCharge,
         source: 'ACCUEIL',
       };
     }
@@ -60,6 +73,7 @@ export class PatientLookupService {
       age: fallback?.age ?? null,
       sexe: fallback?.sexe ?? null,
       idDossier,
+      priseEnCharge: null,
       source: 'FALLBACK',
     };
   }

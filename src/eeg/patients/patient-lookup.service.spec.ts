@@ -2,11 +2,13 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { PatientLookupService } from './patient-lookup.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AccueilClientService } from './accueil-client.service';
+import { PriseEnChargeClientService } from '../../common/clients/prise-en-charge-client.service';
 
 describe('PatientLookupService', () => {
   let service: PatientLookupService;
   let prismaService: PrismaService;
   let accueilClient: AccueilClientService;
+  let priseEnChargeClient: PriseEnChargeClientService;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -29,12 +31,19 @@ describe('PatientLookupService', () => {
             getPatientByExternalId: jest.fn(),
           },
         },
+        {
+          provide: PriseEnChargeClientService,
+          useValue: {
+            getPriseEnCharge: jest.fn().mockResolvedValue(null),
+          },
+        },
       ],
     }).compile();
 
     service = module.get<PatientLookupService>(PatientLookupService);
     prismaService = module.get<PrismaService>(PrismaService);
     accueilClient = module.get<AccueilClientService>(AccueilClientService);
+    priseEnChargeClient = module.get<PriseEnChargeClientService>(PriseEnChargeClientService);
   });
 
   it('should be defined', () => {
@@ -58,6 +67,7 @@ describe('PatientLookupService', () => {
           prenom: 'Data',
           age: 50,
           sexe: 'M',
+          priseEnChargeId: null,
         });
 
       const result = await service.getPatientInfo('CHU-2026-00001');
@@ -68,6 +78,7 @@ describe('PatientLookupService', () => {
         age: 50,
         sexe: 'M',
         idDossier: 'DOS-001',
+        priseEnCharge: null,
         source: 'ACCUEIL',
       });
       expect(getPatientSpy).toHaveBeenCalledWith('CHU-2026-00001');
@@ -94,6 +105,7 @@ describe('PatientLookupService', () => {
         age: 40,
         sexe: 'F',
         idDossier: null,
+        priseEnCharge: null,
         source: 'FALLBACK',
       });
     });
@@ -133,6 +145,7 @@ describe('PatientLookupService', () => {
         prenom: 'B',
         age: 20,
         sexe: 'F',
+        priseEnChargeId: null,
       });
 
       const result = await service.attachPatientInfoToMany([

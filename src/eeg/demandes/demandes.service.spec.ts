@@ -4,12 +4,14 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationExternalService } from '../external/notification-external.service';
 import { PatientLookupService } from '../patients/patient-lookup.service';
 import { PrescriptionClientService } from '../external/prescription-client.service';
+import { UserClientService } from '../../common/clients/user-client.service';
 import { BadRequestException } from '@nestjs/common';
 
 describe('DemandesService', () => {
   let service: DemandesService;
   let prisma: any;
   let prescriptionClient: any;
+  let userClient: any;
 
   const mockPrisma = {
     eegDemande: {
@@ -25,6 +27,7 @@ describe('DemandesService', () => {
     utilisateur: {
       findFirst: jest.fn(),
       findUnique: jest.fn(),
+      upsert: jest.fn(),
     },
     $transaction: jest.fn().mockImplementation((fns: any) => {
       if (typeof fns === 'function') return fns(mockPrisma);
@@ -47,6 +50,10 @@ describe('DemandesService', () => {
     attachPatientInfoToMany: jest.fn().mockImplementation((ds: any) => Promise.resolve(ds)),
   };
 
+  const mockUserClient = {
+    getUserById: jest.fn().mockResolvedValue(null),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -55,12 +62,14 @@ describe('DemandesService', () => {
         { provide: NotificationExternalService, useValue: mockNotificationService },
         { provide: PatientLookupService, useValue: mockPatientLookup },
         { provide: PrescriptionClientService, useValue: mockPrescriptionClient },
+        { provide: UserClientService, useValue: mockUserClient },
       ],
     }).compile();
 
     service = module.get<DemandesService>(DemandesService);
     prisma = mockPrisma;
     prescriptionClient = mockPrescriptionClient;
+    userClient = mockUserClient;
 
     jest.clearAllMocks();
   });
