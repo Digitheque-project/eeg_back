@@ -87,6 +87,7 @@ export class PrescriptionClientService {
   private readonly baseUrl: string;
   private readonly chuId: string;
   private readonly serviceId: string;
+  private readonly token: string;
 
   constructor(private readonly httpService: HttpService) {
     this.baseUrl =
@@ -95,6 +96,12 @@ export class PrescriptionClientService {
     this.chuId = process.env.CHU_ID || '72d49761-2a65-446d-b025-15a74cac1ad4';
     this.serviceId =
       process.env.EEG_SERVICE_ID || '9d965b9f-4737-435f-abe9-73db0d3cf973';
+    this.token = process.env.PRESCRIPTION_API_TOKEN ?? '';
+    if (!this.token) {
+      this.logger.warn(
+        'PRESCRIPTION_API_TOKEN non défini — les appels vers prescription_back échoueront probablement',
+      );
+    }
   }
 
   /**
@@ -112,13 +119,22 @@ export class PrescriptionClientService {
           {
             params: { serviceIdDest, chuId },
             timeout: 20000,
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${this.token}`,
+            },
           },
         ),
       );
 
       return flattenPrescriptions(response.data ?? []);
     } catch (error) {
+      const status = (error as { response?: { status?: number } }).response?.status;
+      if (status === 401 || status === 403) {
+        this.logger.warn(
+          `prescription_back a rejeté la requête GET /eeg (${status}) — vérifier PRESCRIPTION_API_TOKEN (expiré ou permissions insuffisantes)`,
+        );
+      }
       this.logger.warn(
         `Failed to list EEG prescriptions: ${getErrorMessage(error)}`,
       );
@@ -156,11 +172,20 @@ export class PrescriptionClientService {
           { statut, ...(motif ? { motif } : {}) },
           {
             timeout: 20000,
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${this.token}`,
+            },
           },
         ),
       );
     } catch (error) {
+      const status = (error as { response?: { status?: number } }).response?.status;
+      if (status === 401 || status === 403) {
+        this.logger.warn(
+          `prescription_back a rejeté la requête PUT statut ${statut} (${status}) — vérifier PRESCRIPTION_API_TOKEN (expiré ou permissions insuffisantes)`,
+        );
+      }
       this.logger.warn(
         `Failed to sync statut ${statut} for ` +
           `prescription ${prescriptionId}/demande ${demandeId}: ` +
