@@ -11,6 +11,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { PatientLookupService } from './patient-lookup.service';
 import { AccueilClientService } from './accueil-client.service';
 import { PrescriptionClientService } from '../external/prescription-client.service';
+import { PriseEnChargeClientService } from '../../common/clients/prise-en-charge-client.service';
 
 @Controller('eeg/patients')
 export class PatientsController {
@@ -19,6 +20,7 @@ export class PatientsController {
     private readonly patientLookup: PatientLookupService,
     private readonly accueilClient: AccueilClientService,
     private readonly prescriptionClient: PrescriptionClientService,
+    private readonly priseEnChargeClient: PriseEnChargeClientService,
   ) {}
 
   private async toResponse(patient: {
@@ -27,12 +29,16 @@ export class PatientsController {
     prenom: string;
     age: number | null;
     sexe: string | null;
+    priseEnChargeId?: string | null;
   }) {
-    const [idDossier, counts] = await Promise.all([
+    const [idDossier, counts, priseEnCharge] = await Promise.all([
       this.patientLookup.getIdDossier(patient.id),
       this.patientLookup.getPatientCounts(patient.id),
+      patient.priseEnChargeId
+        ? this.priseEnChargeClient.getPriseEnCharge(patient.priseEnChargeId)
+        : Promise.resolve(null),
     ]);
-    return { ...patient, idDossier, _count: counts };
+    return { ...patient, idDossier, _count: counts, priseEnCharge };
   }
 
   @Get()
