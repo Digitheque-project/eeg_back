@@ -55,12 +55,10 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('Token expiré');
     }
 
-    const serviceEntry = payload.services?.find(
-      (s) => s.serviceId === process.env.SSO_EEG_SERVICE_ID,
-    );
+    const serviceEntry = payload.services?.[0];
     if (!serviceEntry) {
       throw new ForbiddenException(
-        'Utilisateur non autorisé pour le service EEG',
+        'Aucun service associé à cet utilisateur',
       );
     }
 
