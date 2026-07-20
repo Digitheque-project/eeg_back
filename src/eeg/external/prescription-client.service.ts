@@ -56,6 +56,27 @@ export interface PrescriptionEegDemandeFlat {
   createdAt?: string;
 }
 
+
+// ─── Normalisation du champ urgence ──────────────────────────────────
+// prescription_back peut envoyer des variantes non conformes à l'enum
+// Prisma NiveauUrgence (STAT | URGENTE | NORMALE). On centralise ici
+// la conversion pour ne jamais propager une valeur invalide en aval.
+const _normLogger = new Logger('normaliserUrgence');
+
+function normaliserUrgence(
+  valeur: string | undefined,
+): 'STAT' | 'URGENTE' | 'NORMALE' {
+  if (!valeur?.trim()) return 'NORMALE';
+  const v = valeur.trim().toUpperCase();
+  if (v === 'STAT') return 'STAT';
+  if (v === 'URGENTE' || v === 'URGENT') return 'URGENTE';
+  if (v === 'NORMALE' || v === 'NORMAL') return 'NORMALE';
+  _normLogger.warn(
+    `Valeur urgence inconnue reçue de prescription_back : "${valeur}" → fallback NORMALE`,
+  );
+  return 'NORMALE';
+}
+
 function flattenPrescriptions(
   raw: PrescriptionEegRawDto[],
 ): PrescriptionEegDemandeFlat[] {
@@ -68,7 +89,7 @@ function flattenPrescriptions(
       prescripteurNomManuel: rx.prescripteurNomManuel,
       prescripteurPrenomManuel: rx.prescripteurPrenomManuel,
       prescripteurExterne: rx.prescripteurExterne,
-      urgence: rx.urgence as PrescriptionEegDemandeFlat['urgence'],
+      urgence: normaliserUrgence(rx.urgence),
       renseignements: rx.renseignements,
       alertes: rx.alertes,
       remarques: rx.remarques,
