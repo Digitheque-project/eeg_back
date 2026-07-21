@@ -96,7 +96,7 @@ export class DemandesService {
       id: p.id,
       numeroEEG: `PRESC-${p.id.slice(0, 8).toUpperCase()}`,
       patientId: p.patientId,
-      prescripteurId: null as string | null,
+      prescripteurId: p.prescripteurId ?? null,
       prescripteurExterneNom: p.prescripteurNomManuel ?? null,
       prescripteurExternePrenom: p.prescripteurPrenomManuel ?? null,
       prescripteurExterne: p.prescripteurExterne ?? false,

@@ -5,6 +5,7 @@ export interface SsoUser {
   nom: string;
   prenom: string;
   email: string;
+  serviceId: string;
   role: string;
   permissions: string[];
 }

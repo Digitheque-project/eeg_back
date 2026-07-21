@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import * as jwt from 'jsonwebtoken';
 
 // ─── Point d'entrée UNIQUE pour toute config d'infrastructure externe ──────
 // Objectif : le jour où le CHU déploie sur sa propre infra (qui ne dort
@@ -25,10 +26,39 @@ function readEnv(name: string): string {
   return value ?? '';
 }
 
+function deriveEegServiceId(): string {
+  const token = process.env.PRESCRIPTION_API_TOKEN;
+  if (token) {
+    try {
+      const payload = jwt.decode(token) as Record<string, unknown> | null;
+      if (payload && typeof payload === 'object' && typeof payload['serviceId'] === 'string') {
+        logger.log(
+          `eegServiceId déduit du payload PRESCRIPTION_API_TOKEN : ${payload['serviceId']}`,
+        );
+        return payload['serviceId'];
+      }
+      logger.warn(
+        'PRESCRIPTION_API_TOKEN décodé mais ne contient pas de champ serviceId exploitable — fallback sur SSO_EEG_SERVICE_ID',
+      );
+    } catch {
+      logger.warn(
+        'Échec du décodage de PRESCRIPTION_API_TOKEN — fallback sur SSO_EEG_SERVICE_ID',
+      );
+    }
+  }
+  const fallback = process.env.SSO_EEG_SERVICE_ID || '';
+  if (!fallback) {
+    logger.warn(
+      'Aucun serviceId disponible : PRESCRIPTION_API_TOKEN ne contient pas de serviceId et SSO_EEG_SERVICE_ID est vide',
+    );
+  }
+  return fallback;
+}
+
 export const externalServicesConfig = {
   // Identité de ce CHU / de ce service EEG dans le système multi-CHU
   chuId: readEnv('CHU_ID'),
-  eegServiceId: readEnv('SSO_EEG_SERVICE_ID'),
+  eegServiceId: deriveEegServiceId(),
 
   // Registre des CHU/services (résolution id → infos)
   chuApiUrl: readEnv('CHU_API_URL'),
