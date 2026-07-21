@@ -3,6 +3,7 @@ import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import axios from 'axios';
 import { getErrorMessage } from '../../common/utils/error.util';
+import { externalServicesConfig } from '../../common/config/external-services.config';
 
 export interface AccueilPatientDto {
   id: string;
@@ -37,10 +38,8 @@ export class AccueilClientService {
   private readonly chuId: string;
 
   constructor(private readonly httpService: HttpService) {
-    this.baseUrl =
-      process.env.ACCUEIL_API_URL ||
-      'https://acceuil-back-production.up.railway.app/accueil';
-    this.chuId = process.env.CHU_ID || '72d49761-2a65-446d-b025-15a74cac1ad4';
+    this.baseUrl = externalServicesConfig.accueilApiUrl;
+    this.chuId = externalServicesConfig.chuId;
   }
 
   private calculateAge(dateNaissance?: string): number | null {

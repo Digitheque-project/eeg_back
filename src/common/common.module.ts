@@ -3,6 +3,7 @@ import { HttpModule } from '@nestjs/axios';
 import { AccueilClientService } from '../eeg/patients/accueil-client.service';
 import { ChuClientService } from './clients/chu-client.service';
 import { UserClientService } from './clients/user-client.service';
+import { UserLookupService } from './clients/user-lookup.service';
 import { PriseEnChargeClientService } from './clients/prise-en-charge-client.service';
 
 const httpModule = HttpModule.register({
@@ -16,12 +17,14 @@ const httpModule = HttpModule.register({
     AccueilClientService,
     ChuClientService,
     UserClientService,
+    UserLookupService,
     PriseEnChargeClientService,
   ],
   exports: [
     AccueilClientService,
     ChuClientService,
     UserClientService,
+    UserLookupService,
     PriseEnChargeClientService,
     httpModule,
   ],

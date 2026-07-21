@@ -4,14 +4,13 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationExternalService } from '../external/notification-external.service';
 import { PatientLookupService } from '../patients/patient-lookup.service';
 import { PrescriptionClientService } from '../external/prescription-client.service';
-import { UserClientService } from '../../common/clients/user-client.service';
-import { BadRequestException } from '@nestjs/common';
+import { UserLookupService } from '../../common/clients/user-lookup.service';
+import { externalServicesConfig } from '../../common/config/external-services.config';
 
 describe('DemandesService', () => {
   let service: DemandesService;
   let prisma: any;
   let prescriptionClient: any;
-  let userClient: any;
 
   const mockPrisma = {
     eegDemande: {
@@ -24,11 +23,6 @@ describe('DemandesService', () => {
     eegNotification: { create: jest.fn() },
     eegRdv: { create: jest.fn(), findFirst: jest.fn().mockResolvedValue(null) },
     eegResultat: { findUnique: jest.fn().mockResolvedValue(null), create: jest.fn(), update: jest.fn() },
-    utilisateur: {
-      findFirst: jest.fn(),
-      findUnique: jest.fn(),
-      upsert: jest.fn(),
-    },
     $transaction: jest.fn().mockImplementation((fns: any) => {
       if (typeof fns === 'function') return fns(mockPrisma);
       return Promise.all(fns);
@@ -50,8 +44,12 @@ describe('DemandesService', () => {
     attachPatientInfoToMany: jest.fn().mockImplementation((ds: any) => Promise.resolve(ds)),
   };
 
-  const mockUserClient = {
-    getUserById: jest.fn().mockResolvedValue(null),
+  const mockUserLookup = {
+    getUserInfo: jest.fn().mockResolvedValue(null),
+    attachPrescripteurInfo: jest.fn().mockImplementation((d: any) => Promise.resolve({ ...d, prescripteur: null })),
+    attachPrescripteurInfoToMany: jest.fn().mockImplementation((ds: any[]) =>
+      Promise.resolve(ds.map((d) => ({ ...d, prescripteur: null }))),
+    ),
   };
 
   beforeEach(async () => {
@@ -62,14 +60,13 @@ describe('DemandesService', () => {
         { provide: NotificationExternalService, useValue: mockNotificationService },
         { provide: PatientLookupService, useValue: mockPatientLookup },
         { provide: PrescriptionClientService, useValue: mockPrescriptionClient },
-        { provide: UserClientService, useValue: mockUserClient },
+        { provide: UserLookupService, useValue: mockUserLookup },
       ],
     }).compile();
 
     service = module.get<DemandesService>(DemandesService);
     prisma = mockPrisma;
     prescriptionClient = mockPrescriptionClient;
-    userClient = mockUserClient;
 
     jest.clearAllMocks();
   });
@@ -78,13 +75,13 @@ describe('DemandesService', () => {
     expect(service).toBeDefined();
   });
 
-  describe('prescriber resolution — unknown external prescriber (Option B)', () => {
-    it('should set prescripteurId to null and populate snapshot fields when prescriber is unknown', async () => {
-      prisma.utilisateur.findFirst.mockResolvedValue(null);
-      prisma.eegDemande.findUnique.mockResolvedValue(null);
-      prisma.eegDemande.findFirst.mockResolvedValue(null);
-
-      const createdDemande = {
+  // Il n'y a plus de table Utilisateur locale : un prescripteurId externe
+  // est utilisé tel quel (pas de cache/upsert local), et le seul repli
+  // configurable est DEFAULT_CHEF_SERVICE_USER_ID. Voir
+  // DemandesService.resolvePrescripteurId.
+  describe('prescriber resolution', () => {
+    it('should set prescripteurId to null and populate snapshot fields for an external prescriber', async () => {
+      prisma.eegDemande.create.mockResolvedValue({
         id: 'local-001',
         numeroEEG: 'EEG-001',
         patientId: 'PAT-001',
@@ -94,8 +91,7 @@ describe('DemandesService', () => {
         prescripteurExterne: true,
         typeEEG: 'STANDARD',
         statut: 'CREEE',
-      };
-      prisma.eegDemande.create.mockResolvedValue(createdDemande);
+      });
       prisma.eegNotification.create.mockResolvedValue({});
 
       prescriptionClient.listEegDemandes.mockResolvedValue([
@@ -131,61 +127,51 @@ describe('DemandesService', () => {
       );
     });
 
-    it('should resolve to CHEF_SERVICE when prescripteurId is null in the API response', async () => {
-      prisma.utilisateur.findFirst.mockResolvedValue({
-        id: 'chef-local-001',
-        nom: 'Chef',
-        prenom: 'Service',
-        role: 'CHEF_SERVICE',
-      });
-      prisma.eegDemande.findUnique.mockResolvedValue(null);
-      prisma.eegDemande.findFirst.mockResolvedValue(null);
-      prisma.eegDemande.create.mockResolvedValue({
-        id: 'local-002',
-        prescripteurId: 'chef-local-001',
-        prescripteurExterneNom: null,
-        prescripteurExternePrenom: null,
-        prescripteurExterne: false,
-      });
-      prisma.eegNotification.create.mockResolvedValue({});
-
-      prescriptionClient.listEegDemandes.mockResolvedValue([
-        {
-          id: 'dem-ext-002',
-          prescriptionParentId: 'rx-ext-002',
-          patientId: 'PAT-002',
-          prescripteurId: null,
-          prescripteurNomManuel: null,
-          prescripteurPrenomManuel: null,
+    it('should fall back to DEFAULT_CHEF_SERVICE_USER_ID when prescripteurId is null in the API response', async () => {
+      externalServicesConfig.defaultChefServiceUserId = 'chef-default-001';
+      try {
+        prisma.eegDemande.create.mockResolvedValue({
+          id: 'local-002',
+          prescripteurId: 'chef-default-001',
+          prescripteurExterneNom: null,
+          prescripteurExternePrenom: null,
           prescripteurExterne: false,
-          typeEEG: 'SOMMEIL',
-          urgence: 'URGENTE',
-        },
-      ]);
+        });
+        prisma.eegNotification.create.mockResolvedValue({});
 
-      const count = await service.syncPendingPrescriptions();
-
-      expect(count).toBe(1);
-      expect(prisma.eegDemande.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            prescripteurId: 'chef-local-001',
-            prescripteurExterneNom: null,
-            prescripteurExternePrenom: null,
+        prescriptionClient.listEegDemandes.mockResolvedValue([
+          {
+            id: 'dem-ext-002',
+            prescriptionParentId: 'rx-ext-002',
+            patientId: 'PAT-002',
+            prescripteurId: null,
+            prescripteurNomManuel: null,
+            prescripteurPrenomManuel: null,
             prescripteurExterne: false,
+            typeEEG: 'SOMMEIL',
+            urgence: 'URGENTE',
+          },
+        ]);
+
+        const count = await service.syncPendingPrescriptions();
+
+        expect(count).toBe(1);
+        expect(prisma.eegDemande.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              prescripteurId: 'chef-default-001',
+              prescripteurExterneNom: null,
+              prescripteurExternePrenom: null,
+              prescripteurExterne: false,
+            }),
           }),
-        }),
-      );
+        );
+      } finally {
+        externalServicesConfig.defaultChefServiceUserId = '';
+      }
     });
 
-    it('should use local prescripteurId when the external prescriber exists locally', async () => {
-      prisma.utilisateur.findUnique.mockResolvedValue({
-        id: 'ext-doc-001',
-        nom: 'Local',
-        prenom: 'Doc',
-      });
-      prisma.eegDemande.findUnique.mockResolvedValue(null);
-      prisma.eegDemande.findFirst.mockResolvedValue(null);
+    it('should trust an externally-provided prescripteurId as-is (no local lookup or cache)', async () => {
       prisma.eegDemande.create.mockResolvedValue({
         id: 'local-003',
         prescripteurId: 'ext-doc-001',

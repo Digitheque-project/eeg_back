@@ -14,6 +14,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { StatutRdv } from '@prisma/client';
 import { PatientLookupService } from '../patients/patient-lookup.service';
+import { UserLookupService } from '../../common/clients/user-lookup.service';
 import { estWeekend, ajouterMinutes } from '../../common/utils/date.util';
 import { CreateRdvDto } from './dto/create-rdv.dto';
 import { ModifierRdvDto } from './dto/modifier-rdv.dto';
@@ -37,6 +38,7 @@ export class RdvsController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly patientLookup: PatientLookupService,
+    private readonly userLookup: UserLookupService,
   ) {}
 
   @Get()
@@ -57,7 +59,6 @@ export class RdvsController {
     const rdvs = await this.prisma.eegRdv.findMany({
       where,
       include: {
-        prescripteur: { select: { nom: true, role: true } },
         demande: {
           select: {
             numeroEEG: true,
@@ -70,7 +71,8 @@ export class RdvsController {
       },
       orderBy: { dateRdv: 'asc' },
     });
-    return this.patientLookup.attachPatientInfoToMany(rdvs);
+    const avecPatient = await this.patientLookup.attachPatientInfoToMany(rdvs);
+    return this.userLookup.attachPrescripteurInfoToMany(avecPatient);
   }
 
   @Get('semaine')
@@ -85,7 +87,6 @@ export class RdvsController {
     const rdvs = await this.prisma.eegRdv.findMany({
       where: { dateRdv: { gte: debutSemaine, lte: finSemaine } },
       include: {
-        prescripteur: { select: { nom: true, role: true } },
         demande: {
           select: {
             numeroEEG: true,
@@ -98,7 +99,8 @@ export class RdvsController {
       },
       orderBy: { dateRdv: 'asc' },
     });
-    return this.patientLookup.attachPatientInfoToMany(rdvs);
+    const avecPatient = await this.patientLookup.attachPatientInfoToMany(rdvs);
+    return this.userLookup.attachPrescripteurInfoToMany(avecPatient);
   }
 
   @Get('today')
@@ -110,7 +112,6 @@ export class RdvsController {
     const rdvs = await this.prisma.eegRdv.findMany({
       where: { dateRdv: { gte: debut, lte: fin } },
       include: {
-        prescripteur: { select: { nom: true, role: true } },
         demande: {
           select: {
             numeroEEG: true,
@@ -122,7 +123,8 @@ export class RdvsController {
       },
       orderBy: { heureDebut: 'asc' },
     });
-    return this.patientLookup.attachPatientInfoToMany(rdvs);
+    const avecPatient = await this.patientLookup.attachPatientInfoToMany(rdvs);
+    return this.userLookup.attachPrescripteurInfoToMany(avecPatient);
   }
 
   @Get(':id')
@@ -130,13 +132,13 @@ export class RdvsController {
     const rdv = await this.prisma.eegRdv.findUnique({
       where: { id },
       include: {
-        prescripteur: true,
         demande: true,
         notifications: true,
       },
     });
     if (!rdv) return null;
-    return this.patientLookup.attachPatientInfo(rdv);
+    const avecPatient = await this.patientLookup.attachPatientInfo(rdv);
+    return this.userLookup.attachPrescripteurInfo(avecPatient);
   }
 
   @Post()
@@ -160,11 +162,9 @@ export class RdvsController {
         dureeMinutes: body.dureeMinutes,
         renseignementClinique: body.renseignementClinique ?? null,
       },
-      include: {
-        prescripteur: true,
-      },
     });
-    return this.patientLookup.attachPatientInfo(rdv);
+    const avecPatient = await this.patientLookup.attachPatientInfo(rdv);
+    return this.userLookup.attachPrescripteurInfo(avecPatient);
   }
 
   @Patch(':id')
@@ -195,9 +195,10 @@ export class RdvsController {
     const rdv = await this.prisma.eegRdv.update({
       where: { id },
       data,
-      include: { prescripteur: true, demande: true },
+      include: { demande: true },
     });
-    return this.patientLookup.attachPatientInfo(rdv);
+    const avecPatient = await this.patientLookup.attachPatientInfo(rdv);
+    return this.userLookup.attachPrescripteurInfo(avecPatient);
   }
 
   @Patch(':id/realiser')

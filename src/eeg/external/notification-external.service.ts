@@ -3,6 +3,7 @@ import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import axios from 'axios';
 import { getErrorMessage } from '../../common/utils/error.util';
+import { externalServicesConfig } from '../../common/config/external-services.config';
 
 @Injectable()
 export class NotificationExternalService {
@@ -10,9 +11,7 @@ export class NotificationExternalService {
   private readonly baseUrl: string;
 
   constructor(private readonly httpService: HttpService) {
-    this.baseUrl =
-      process.env.NOTIFICATION_SERVICE_URL ||
-      'https://service-notification.onrender.com';
+    this.baseUrl = externalServicesConfig.notificationServiceUrl;
   }
 
   async sendNotification(dto: any): Promise<any> {

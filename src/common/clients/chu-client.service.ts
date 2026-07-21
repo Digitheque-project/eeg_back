@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { getErrorMessage } from '../utils/error.util';
+import { externalServicesConfig } from '../config/external-services.config';
 
 export interface ChuInfoDto {
   id: string;
@@ -25,30 +26,35 @@ export interface ServiceInfoDto {
 @Injectable()
 export class ChuClientService {
   private readonly logger = new Logger(ChuClientService.name);
-  private readonly baseUrl: string;
+  // Deux registres distincts : chu-service (infos CHU + prise en charge) et
+  // service-service (registre des services rattachés à un CHU) — ne pas les
+  // confondre, ce sont deux backends séparés malgré des noms proches.
+  private readonly chuServiceBaseUrl: string;
+  private readonly serviceRegistryBaseUrl: string;
   private readonly chuId: string;
   private readonly serviceId: string;
 
   constructor(private readonly httpService: HttpService) {
-    this.baseUrl =
-      process.env.CHU_API_URL ||
-      'https://service-chu-back-production-d6a8.up.railway.app/service-chu';
-    this.chuId = process.env.CHU_ID || '72d49761-2a65-446d-b025-15a74cac1ad4';
-    this.serviceId =
-      process.env.EEG_SERVICE_ID || '9d965b9f-4737-435f-abe9-73db0d3cf973';
+    this.chuServiceBaseUrl = externalServicesConfig.chuServiceUrl;
+    this.serviceRegistryBaseUrl = externalServicesConfig.chuApiUrl;
+    this.chuId = externalServicesConfig.chuId;
+    this.serviceId = externalServicesConfig.eegServiceId;
   }
 
   /**
-   * Get CHU info by id
+   * Get CHU info by id — via chu-service (chu-docs : GET /chu/{id})
    * @param chuId - CHU id, defaults to this service's own CHU_ID
    */
   async getChuInfo(chuId: string = this.chuId): Promise<ChuInfoDto | null> {
     try {
       const response = await firstValueFrom(
-        this.httpService.get<ChuInfoDto>(`${this.baseUrl}/chu/${chuId}`, {
-          timeout: 5000,
-          headers: { 'Content-Type': 'application/json' },
-        }),
+        this.httpService.get<ChuInfoDto>(
+          `${this.chuServiceBaseUrl}/chu/${chuId}`,
+          {
+            timeout: 5000,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
       );
       return response.data;
     } catch (error) {
@@ -60,7 +66,7 @@ export class ChuClientService {
   }
 
   /**
-   * Get service info by id
+   * Get service info by id — via service-service (services-docs : GET /services/{id})
    * @param serviceId - Service id, defaults to this service's own EEG_SERVICE_ID
    */
   async getServiceInfo(
@@ -69,7 +75,7 @@ export class ChuClientService {
     try {
       const response = await firstValueFrom(
         this.httpService.get<ServiceInfoDto>(
-          `${this.baseUrl}/service/${serviceId}`,
+          `${this.serviceRegistryBaseUrl}/services/${serviceId}`,
           {
             timeout: 5000,
             headers: { 'Content-Type': 'application/json' },

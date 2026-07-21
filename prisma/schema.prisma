@@ -60,21 +60,6 @@ enum ActionAudit {
   ACK
 }
 
-enum RoleUtilisateur {
-  TECHNICIEN
-  CHEF_SERVICE
-  MAJOR_SERVICE
-}
-
-enum OrdreProfessionnel {
-  ONM
-  ONIM
-  ONSFM
-  ONPM
-  AUTRE
-  AUCUN
-}
-
 // EEG-local dossier numbering for a patient (patientId is an external id from Accueil).
 // Patients themselves are no longer stored here — Accueil is the source of truth.
 model EegDossier {
@@ -87,32 +72,12 @@ model EegDossier {
   @@map("eeg_dossier")
 }
 
-model Utilisateur {
-  id                  String             @id @default(uuid())
-  nom                 String
-  prenom              String
-  email               String             @unique
-  telephone           String?
-  matricule           String?
-  role                RoleUtilisateur
-  ordresProfessionnel OrdreProfessionnel @default(AUCUN)
-  numeroOrdre         String?
-  signatureNumerique  String?
-  actif               Boolean            @default(true)
-  createdAt           DateTime           @default(now())
-  updatedAt           DateTime           @updatedAt
-
-  demandesPrescrits      EegDemande[]       @relation("prescripteur")
-  rdvsPrescrits          EegRdv[]           @relation("prescripteurRdv")
-  notificationsAssignees EegNotification[]
-  activites              EegActivite[]
-  resultatsValides       EegResultat[]
-  rectifications         EegRectification[]
-  audits                 EegAudit[]
-
-  @@map("utilisateur")
-}
-
+// Il n'y a plus de modèle Utilisateur local : identité, rôle et permissions
+// viennent uniquement du service auth externe (JWT décodé par JwtAuthGuard).
+// Tous les *Id ci-dessous (prescripteurId, technicienId, medecinValidateurId,
+// auteurId, assigneeUserId, userId, utilisateurId) sont de simples ids
+// externes — résolus à la volée via UserLookupService quand un nom
+// d'affichage est nécessaire, jamais via une relation Prisma.
 model EegDemande {
   id                       String        @id @default(uuid())
   numeroEEG                String        @unique
@@ -135,7 +100,6 @@ model EegDemande {
   dateValidation           DateTime?
   motifAnnulation          String?
 
-  prescripteur  Utilisateur?      @relation("prescripteur", fields: [prescripteurId], references: [id], onDelete: SetNull)
   resultat      EegResultat?
   notifications EegNotification[]
   audits        EegAudit[]
@@ -165,7 +129,6 @@ model EegRdv {
   technicienRealisateurId String?
   createdAt               DateTime      @default(now())
 
-  prescripteur  Utilisateur?      @relation("prescripteurRdv", fields: [prescripteurId], references: [id], onDelete: SetNull)
   demande       EegDemande?       @relation(fields: [demandeId], references: [id])
   notifications EegNotification[]
 
@@ -210,9 +173,8 @@ model EegResultat {
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
-  demande           EegDemande         @relation(fields: [demandeId], references: [id])
-  medecinValidateur Utilisateur?       @relation(fields: [medecinValidateurId], references: [id])
-  rectifications    EegRectification[]
+  demande        EegDemande         @relation(fields: [demandeId], references: [id])
+  rectifications EegRectification[]
 
   @@map("eeg_resultat")
 }
@@ -227,7 +189,6 @@ model EegRectification {
   dateRectification DateTime @default(now())
 
   resultat EegResultat @relation(fields: [resultatId], references: [id])
-  auteur   Utilisateur @relation(fields: [auteurId], references: [id])
 
   @@map("eeg_rectification")
 }
@@ -247,10 +208,9 @@ model EegNotification {
   demandeId      String?
   dateLecture    DateTime?
 
-  assigneeUser Utilisateur?            @relation(fields: [assigneeUserId], references: [id])
-  rdv          EegRdv?                 @relation(fields: [rdvId], references: [id])
-  demande      EegDemande?             @relation(fields: [demandeId], references: [id])
-  actions      EegNotificationAction[]
+  rdv     EegRdv?                 @relation(fields: [rdvId], references: [id])
+  demande EegDemande?             @relation(fields: [demandeId], references: [id])
+  actions EegNotificationAction[]
 
   @@map("eeg_notification")
 }
@@ -275,8 +235,6 @@ model EegActivite {
   userId      String?
   patientId   String?
 
-  user Utilisateur? @relation(fields: [userId], references: [id])
-
   @@map("eeg_activite")
 }
 
@@ -292,8 +250,7 @@ model EegAudit {
   dateAction    DateTime    @default(now())
   demandeId     String?
 
-  utilisateur Utilisateur @relation(fields: [utilisateurId], references: [id])
-  demande     EegDemande? @relation(fields: [demandeId], references: [id])
+  demande EegDemande? @relation(fields: [demandeId], references: [id])
 
   @@map("eeg_audit")
 }

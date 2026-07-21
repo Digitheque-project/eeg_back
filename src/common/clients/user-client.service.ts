@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { getErrorMessage } from '../utils/error.util';
+import { externalServicesConfig } from '../config/external-services.config';
 
 export interface UserServicesDto {
   id: string;
@@ -25,15 +26,8 @@ export class UserClientService {
   private readonly apiKey: string;
 
   constructor(private readonly httpService: HttpService) {
-    this.baseUrl =
-      process.env.USER_SERVICE_URL ||
-      'https://user-services-1sm6.onrender.com';
-    this.apiKey = process.env.INTERNAL_API_KEY || '';
-    if (!this.apiKey) {
-      this.logger.warn(
-        'INTERNAL_API_KEY non défini — les appels vers user-services échoueront probablement',
-      );
-    }
+    this.baseUrl = externalServicesConfig.userServiceUrl;
+    this.apiKey = externalServicesConfig.internalApiKey;
   }
 
   /**

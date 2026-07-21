@@ -11,11 +11,12 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PatientLookupService } from '../patients/patient-lookup.service';
-import { UserClientService } from '../../common/clients/user-client.service';
+import { UserLookupService } from '../../common/clients/user-lookup.service';
 import { getErrorMessage } from '../../common/utils/error.util';
 import { estWeekend, ajouterMinutes } from '../../common/utils/date.util';
 import { PlanifierRdvDto } from './dto/planifier-rdv.dto';
 import { ArchiverResultatDto } from './dto/archiver-resultat.dto';
+import { externalServicesConfig } from '../../common/config/external-services.config';
 
 @Injectable()
 export class DemandesService {
@@ -26,43 +27,37 @@ export class DemandesService {
     private readonly notificationService: NotificationExternalService,
     private readonly patientLookup: PatientLookupService,
     private readonly prescriptionClient: PrescriptionClientService,
-    private readonly userClient: UserClientService,
+    private readonly userLookup: UserLookupService,
   ) {}
 
-  // ─── Prescripteur par défaut (CHEF_SERVICE actif) ─────────────────
-  private async getDefaultPrescripteurId(): Promise<string | null> {
-    const u = await this.prisma.utilisateur.findFirst({
-      where: { role: 'CHEF_SERVICE', actif: true },
-    });
-    return u?.id ?? null;
-  }
-
-  // ─── Résolution prescripteur externe (Option B) ───────────────────
-  // Quatre chemins possibles :
-  //   A) prescripteurExterne=true + nom manuel → snapshot nom/prénom
-  //   B) prescripteurExterne=false + id trouvé localement → réutilise l'id local
-  //   C) prescripteurId absent/null → fallback CHEF_SERVICE
-  //   D) prescripteurExterne=false + id absent localement → appel user-services + upsert
-  private async resolvePrescripteurId(
+  // ─── Résolution prescripteur externe ──────────────────────────────
+  // Plus de table Utilisateur locale : un prescripteurId est un id externe
+  // (service User) auquel on fait confiance tel quel — résolu à la volée
+  // pour l'affichage via UserLookupService, jamais mis en cache localement.
+  // Trois chemins possibles :
+  //   A) prescripteurExterne=true + nom manuel → snapshot nom/prénom (texte)
+  //   B) id fourni, pas marqué externe → utilisé tel quel comme prescripteurId
+  //   C) prescripteurId absent/null → fallback DEFAULT_CHEF_SERVICE_USER_ID
+  private resolvePrescripteurId(
     externalId: string | undefined,
     prescripteurExterne: boolean | undefined,
     externalNomManuel?: string,
     externalPrenomManuel?: string,
-  ): Promise<{
+  ): {
     prescripteurId: string | null;
     prescripteurExterneNom: string | null;
     prescripteurExternePrenom: string | null;
-  }> {
+  } {
     // ── Cas C : pas d'id du tout → CHEF_SERVICE par défaut ──────────
     if (!externalId) {
-      const fallbackId = await this.getDefaultPrescripteurId();
+      const fallbackId = externalServicesConfig.defaultChefServiceUserId || null;
       if (fallbackId) {
         this.logger.log(
           `👤 Prescripteur null → CHEF_SERVICE par défaut (${fallbackId})`,
         );
       } else {
         this.logger.warn(
-          '⚠️ Aucun prescripteur et aucun CHEF_SERVICE actif trouvé',
+          '⚠️ Aucun prescripteur et DEFAULT_CHEF_SERVICE_USER_ID non configuré',
         );
       }
       return {
@@ -87,63 +82,9 @@ export class DemandesService {
       };
     }
 
-    // ── Cas B : id fourni, pas marqué externe → cherche localement ──
-    const local = await this.prisma.utilisateur.findUnique({
-      where: { id: externalId },
-    });
-    if (local) {
-      this.logger.log(
-        `👤 Prescripteur local trouvé: ${local.prenom} ${local.nom} (${local.id})`,
-      );
-      return {
-        prescripteurId: local.id,
-        prescripteurExterneNom: null,
-        prescripteurExternePrenom: null,
-      };
-    }
-
-    // ── Cas D : id fourni mais absent localement → appel user-services ─
-    this.logger.log(
-      `👤 Prescripteur ${externalId} absent localement, appel user-services…`,
-    );
-    const remoteUser = await this.userClient.getUserById(externalId);
-    if (remoteUser) {
-      // Upsert dans la table locale pour les prochaines fois
-      const upserted = await this.prisma.utilisateur.upsert({
-        where: { id: remoteUser.id },
-        update: {
-          nom: remoteUser.name,
-          prenom: remoteUser.firstname ?? '',
-          email: remoteUser.email ?? '',
-          telephone: remoteUser.phone ?? null,
-          matricule: remoteUser.matricule ?? null,
-        },
-        create: {
-          id: remoteUser.id,
-          nom: remoteUser.name,
-          prenom: remoteUser.firstname ?? '',
-          email: remoteUser.email ?? '',
-          telephone: remoteUser.phone ?? null,
-          matricule: remoteUser.matricule ?? null,
-          role: 'TECHNICIEN',
-        },
-      });
-      this.logger.log(
-        `👤 Prescripteur upserté depuis user-services: ${upserted.prenom} ${upserted.nom} (${upserted.id})`,
-      );
-      return {
-        prescripteurId: upserted.id,
-        prescripteurExterneNom: null,
-        prescripteurExternePrenom: null,
-      };
-    }
-
-    // ── Fallback : introuvable partout → prescripteur sans nom ──────
-    this.logger.warn(
-      `⚠️ prescripteurId ${externalId} introuvable (local + user-services)`,
-    );
+    // ── Cas B : id fourni par le service User → utilisé tel quel ────
     return {
-      prescripteurId: null,
+      prescripteurId: externalId,
       prescripteurExterneNom: null,
       prescripteurExternePrenom: null,
     };
@@ -184,7 +125,7 @@ export class DemandesService {
         `parent: ${p.prescriptionParentId}`,
     );
 
-    const resolved = await this.resolvePrescripteurId(
+    const resolved = this.resolvePrescripteurId(
       p.prescripteurId,
       p.prescripteurExterne,
       p.prescripteurNomManuel,
@@ -299,13 +240,11 @@ export class DemandesService {
     prescripteurId?: string | null;
     prescripteurExterneNom?: string | null;
     prescripteurExternePrenom?: string | null;
-    prescripteur?: { id: string } | null;
     prescripteurNomManuel?: string | null;
     prescripteurPrenomManuel?: string | null;
   }): boolean {
     if (d.prescripteurId) return true;
     if (d.prescripteurExterneNom || d.prescripteurExternePrenom) return true;
-    if (d.prescripteur) return true;
     if (d.prescripteurNomManuel || d.prescripteurPrenomManuel) return true;
     return false;
   }
@@ -317,7 +256,7 @@ export class DemandesService {
 
     const [locales, flatDemandes] = await Promise.all([
       this.prisma.eegDemande.findMany({
-        include: { prescripteur: true, resultat: true, rdv: true },
+        include: { resultat: true, rdv: true },
         orderBy: { dateCreation: 'desc' },
       }),
       this.prescriptionClient.listEegDemandes(),
@@ -348,23 +287,28 @@ export class DemandesService {
         new Date(b.dateCreation).getTime() - new Date(a.dateCreation).getTime(),
     );
 
-    return { toutes: await this.patientLookup.attachPatientInfoToMany(toutes) };
+    const avecPatient = await this.patientLookup.attachPatientInfoToMany(toutes);
+    return { toutes: await this.userLookup.attachPrescripteurInfoToMany(avecPatient) };
   }
 
   // ─── Détail d'une demande ─────────────────────────────────────────
   async getDemandeById(id: string) {
     const local = await this.prisma.eegDemande.findFirst({
       where: { OR: [{ id }, { prescriptionSourceId: id }] },
-      include: { prescripteur: true, resultat: true, rdv: true },
+      include: { resultat: true, rdv: true },
     });
-    if (local) return this.patientLookup.attachPatientInfo(local);
+    if (local) {
+      const avecPatient = await this.patientLookup.attachPatientInfo(local);
+      return this.userLookup.attachPrescripteurInfo(avecPatient);
+    }
 
     const demande =
       await this.prescriptionClient.findDemandeEegById(id);
     if (!demande) throw new NotFoundException(`Demande ${id} introuvable`);
-    return this.patientLookup.attachPatientInfo(
+    const avecPatient = await this.patientLookup.attachPatientInfo(
       this.buildVirtualDemande(demande),
     );
+    return this.userLookup.attachPrescripteurInfo(avecPatient);
   }
 
   async getDemandesByPatient(patientId: string) {
@@ -440,9 +384,9 @@ export class DemandesService {
     const heureFin = ajouterMinutes(dto.heureDebut, dureeMinutes);
 
     // EegRdv.prescripteurId est nullable — si la demande n'a pas de
-    // prescripteur local, on utilise le CHEF_SERVICE par défaut.
+    // prescripteur, on utilise le CHEF_SERVICE par défaut (configuré).
     const prescripteurIdRdv =
-      d.prescripteurId ?? (await this.getDefaultPrescripteurId()) ?? '';
+      d.prescripteurId ?? externalServicesConfig.defaultChefServiceUserId ?? '';
 
     await this.prisma.eegRdv.create({
       data: {
@@ -565,7 +509,7 @@ export class DemandesService {
         type: 'RESULTAT_DISPONIBLE',
         motif: `Résultat EEG disponible pour la demande ${demandeMaj.numeroEEG}`,
         urgence: d.urgence === 'STAT' ? 3 : d.urgence === 'URGENTE' ? 2 : 1,
-        sourceServiceId: process.env.EEG_SERVICE_ID,
+        sourceServiceId: externalServicesConfig.eegServiceId,
         sourceServiceName: 'EEG',
         patientId: demandeMaj.patientId,
         sentAt: new Date().toISOString(),

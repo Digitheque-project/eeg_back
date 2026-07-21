@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { getErrorMessage } from '../../common/utils/error.util';
+import { externalServicesConfig } from '../../common/config/external-services.config';
 
 // ─── Shape réelle retournée par GET /prescriptions/eeg ──────────────
 // Le endpoint renvoie des prescriptions parents, chacune contenant un
@@ -137,13 +138,10 @@ export class PrescriptionClientService {
   private readonly token: string;
 
   constructor(private readonly httpService: HttpService) {
-    this.baseUrl =
-      process.env.PRESCRIPTION_API_URL ||
-      'https://prescriptionback-production.up.railway.app/prescriptions';
-    this.chuId = process.env.CHU_ID || '72d49761-2a65-446d-b025-15a74cac1ad4';
-    this.serviceId =
-      process.env.EEG_SERVICE_ID || '9d965b9f-4737-435f-abe9-73db0d3cf973';
-    this.token = process.env.PRESCRIPTION_API_TOKEN ?? '';
+    this.baseUrl = externalServicesConfig.prescriptionApiUrl;
+    this.chuId = externalServicesConfig.chuId;
+    this.serviceId = externalServicesConfig.eegServiceId;
+    this.token = externalServicesConfig.prescriptionApiToken;
     if (!this.token) {
       this.logger.warn(
         'PRESCRIPTION_API_TOKEN non défini — les appels vers prescription_back échoueront probablement',

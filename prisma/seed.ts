@@ -1,4 +1,4 @@
-import { PrismaClient, RoleUtilisateur, OrdreProfessionnel } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -21,23 +21,11 @@ async function main() {
   console.log('✅ Dossiers EEG (patients gérés par Accueil)');
 
   // ─── Utilisateurs ────────────────────────────────────────────────────
-  // Ids alignés sur les comptes SSO réels (service auth externe) — voir
-  // JwtAuthGuard / AuthController.me : la fiche locale est provisionnée à
-  // la volée avec l'id de l'utilisateur SSO, ce seed ne fait que
-  // pré-remplir les champs métier (ordre professionnel, matricule...).
-  await prisma.utilisateur.upsert({
-    where: { email: 'jean.raharison@chu-andrainjato.mg' }, update: {},
-    create: { id: '83b45e70-86e9-4fc7-beda-a66c2a944ba6', nom: 'Raharison', prenom: 'Jean', email: 'jean.raharison@chu-andrainjato.mg', telephone: '0340000002', matricule: 'EEG-CHF-001', role: RoleUtilisateur.CHEF_SERVICE, ordresProfessionnel: OrdreProfessionnel.ONM, numeroOrdre: 'ONM-2018-0123', actif: true },
-  });
-  await prisma.utilisateur.upsert({
-    where: { email: 'toky.rakotomalala@chu-andrainjato.mg' }, update: {},
-    create: { id: '1abc5592-d322-4d11-9502-386038cd92cd', nom: 'Rakotomalala', prenom: 'Toky', email: 'toky.rakotomalala@chu-andrainjato.mg', telephone: '0340000001', matricule: 'EEG-TEC-001', role: RoleUtilisateur.TECHNICIEN, ordresProfessionnel: OrdreProfessionnel.AUCUN, actif: true },
-  });
-  await prisma.utilisateur.upsert({
-    where: { email: 'miora.andrianasolo@chu-andrainjato.mg' }, update: {},
-    create: { id: 'f0577ade-0a22-448f-98df-cb612739e4f5', nom: 'Andrianasolo', prenom: 'Miora', email: 'miora.andrianasolo@chu-andrainjato.mg', telephone: '0340000003', matricule: 'EEG-MAJ-001', role: RoleUtilisateur.MAJOR_SERVICE, ordresProfessionnel: OrdreProfessionnel.AUCUN, actif: true },
-  });
-  console.log('✅ Utilisateurs');
+  // Plus de table locale : identité, rôle et permissions viennent du
+  // service auth externe (JwtAuthGuard décode le JWT SSO à chaque requête).
+  // Rien à semer ici — les comptes réels sont créés côté auth-service /
+  // user-services, avec les rôles TECHNICIEN / CHEF_SERVICE / MAJOR_SERVICE
+  // déjà enregistrés pour ce service EEG (serviceId = SSO_EEG_SERVICE_ID).
 
   // ─── Demandes EEG ────────────────────────────────────────────────────
   // Il n'y a plus de demande de démonstration : les demandes EEG ne sont
@@ -47,7 +35,6 @@ async function main() {
   // (planifier, refuser, réaliser). Voir DemandesService.resolveOrPromote.
 
   console.log('🎉 Seed terminé !');
-  console.log('Connexion via https://auth-client-dun.vercel.app/login (compte SSO, pas de mot de passe local)');
 }
 
 main().catch((e) => { console.error('❌', e); process.exit(1); }).finally(() => prisma.$disconnect());

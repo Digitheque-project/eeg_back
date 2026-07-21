@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { getErrorMessage } from '../utils/error.util';
+import { externalServicesConfig } from '../config/external-services.config';
 
 export interface PriseEnChargeDto {
   id: string;
@@ -22,9 +23,8 @@ export class PriseEnChargeClientService {
   private readonly apiKey: string;
 
   constructor(private readonly httpService: HttpService) {
-    this.baseUrl =
-      process.env.CHU_SERVICE_URL || 'https://chu-service-7bxj.onrender.com';
-    this.apiKey = process.env.INTERNAL_API_KEY || '';
+    this.baseUrl = externalServicesConfig.chuServiceUrl;
+    this.apiKey = externalServicesConfig.internalApiKey;
   }
 
   /**

@@ -3,6 +3,7 @@ import { ApiTags, ApiOperation, ApiQuery, ApiResponse } from '@nestjs/swagger';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PatientLookupService } from '../patients/patient-lookup.service';
+import { UserLookupService } from '../../common/clients/user-lookup.service';
 
 @ApiTags('Archives')
 @Controller('eeg/archives')
@@ -10,6 +11,7 @@ export class ArchivesController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly patientLookup: PatientLookupService,
+    private readonly userLookup: UserLookupService,
   ) {}
 
   @Get()
@@ -90,11 +92,8 @@ export class ArchivesController {
               statut: true,
               dateCreation: true,
               patientId: true,
-              prescripteur: { select: { nom: true, prenom: true, role: true } },
+              prescripteurId: true,
             },
-          },
-          medecinValidateur: {
-            select: { nom: true, prenom: true, role: true, numeroOrdre: true },
           },
           rectifications: {
             orderBy: { dateRectification: 'desc' },
@@ -110,10 +109,16 @@ export class ArchivesController {
 
     const data = await Promise.all(
       resultats.map(async (r) => {
-        const patient = await this.patientLookup.getPatientInfo(
-          r.demande.patientId,
-        );
-        return { ...r, demande: { ...r.demande, patient } };
+        const [patient, prescripteur, medecinValidateur] = await Promise.all([
+          this.patientLookup.getPatientInfo(r.demande.patientId),
+          this.userLookup.getUserInfo(r.demande.prescripteurId),
+          this.userLookup.getUserInfo(r.medecinValidateurId),
+        ]);
+        return {
+          ...r,
+          medecinValidateur,
+          demande: { ...r.demande, patient, prescripteur },
+        };
       }),
     );
 
@@ -181,16 +186,14 @@ export class ArchivesController {
       this.prisma.eegDemande.count({ where }),
       this.prisma.eegDemande.findMany({
         where,
-        include: {
-          prescripteur: { select: { nom: true, prenom: true, role: true } },
-        },
         orderBy: { dateCreation: 'desc' },
         skip,
         take: limitNum,
       }),
     ]);
 
-    const data = await this.patientLookup.attachPatientInfoToMany(demandes);
+    const avecPatient = await this.patientLookup.attachPatientInfoToMany(demandes);
+    const data = await this.userLookup.attachPrescripteurInfoToMany(avecPatient);
 
     return {
       data,
