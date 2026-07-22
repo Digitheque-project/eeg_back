@@ -9,6 +9,16 @@ import { AccueilClientService } from '../patients/accueil-client.service';
 // service (confirmé avec le major de service).
 const SEUIL_ENFANT_ANS = 18;
 
+type TypeEEGFilter = 'STANDARD' | 'SOMMEIL' | 'AMBULATOIRE' | 'VIDEO_EEG';
+type SexeFilter = 'M' | 'F';
+type StatutFilter =
+  | 'CREEE'
+  | 'PLANIFIEE'
+  | 'EN_COURS'
+  | 'RESULTAT_DISPONIBLE'
+  | 'ANNULEE';
+type UrgenceFilter = 'STAT' | 'URGENTE' | 'NORMALE';
+
 @ApiTags('Rapports')
 @Controller('eeg/rapports')
 export class RapportsController {
@@ -18,9 +28,6 @@ export class RapportsController {
     private readonly accueilClient: AccueilClientService,
   ) {}
 
-  // Construit le filtre de période commun à tous les rapports — permet de
-  // basculer entre vue hebdomadaire, mensuelle ou toute autre période
-  // personnalisée depuis le même mécanisme dateDebut/dateFin.
   private buildPeriodeWhere(
     dateDebut?: string,
     dateFin?: string,
@@ -36,43 +43,64 @@ export class RapportsController {
     return filtre;
   }
 
+  private buildBaseWhere(
+    dateDebut?: string,
+    dateFin?: string,
+    typeEEG?: TypeEEGFilter,
+    urgence?: UrgenceFilter,
+  ): Prisma.EegDemandeWhereInput {
+    const where: Prisma.EegDemandeWhereInput = {};
+    const periode = this.buildPeriodeWhere(dateDebut, dateFin);
+    if (periode) where.dateCreation = periode;
+    if (typeEEG) where.typeEEG = typeEEG;
+    if (urgence) where.urgence = urgence;
+    return where;
+  }
+
   @Get('activite')
   @ApiOperation({ summary: 'Volumes des demandes EEG' })
-  @ApiQuery({
-    name: 'dateDebut',
-    required: false,
-    description: 'YYYY-MM-DD — pour une vue hebdomadaire ou mensuelle',
-  })
+  @ApiQuery({ name: 'dateDebut', required: false, description: 'YYYY-MM-DD' })
   @ApiQuery({ name: 'dateFin', required: false, description: 'YYYY-MM-DD' })
+  @ApiQuery({ name: 'typeEEG', required: false, enum: ['STANDARD', 'SOMMEIL', 'AMBULATOIRE', 'VIDEO_EEG'] })
+  @ApiQuery({ name: 'urgence', required: false, enum: ['STAT', 'URGENTE', 'NORMALE'] })
+  @ApiQuery({ name: 'statut', required: false, enum: ['CREEE', 'PLANIFIEE', 'EN_COURS', 'RESULTAT_DISPONIBLE', 'ANNULEE'] })
   async getActivite(
     @Query('dateDebut') dateDebut?: string,
     @Query('dateFin') dateFin?: string,
+    @Query('typeEEG') typeEEG?: TypeEEGFilter,
+    @Query('urgence') urgence?: UrgenceFilter,
+    @Query('statut') statut?: StatutFilter,
   ) {
-    const periode = this.buildPeriodeWhere(dateDebut, dateFin);
-    const where: Prisma.EegDemandeWhereInput = periode
-      ? { dateCreation: periode }
-      : {};
+    const base = this.buildBaseWhere(dateDebut, dateFin, typeEEG, urgence);
+
+    if (statut) {
+      return {
+        recues: await this.prisma.eegDemande.count({ where: { ...base, statut } }),
+        traitees: await this.prisma.eegDemande.count({ where: { ...base, statut: 'RESULTAT_DISPONIBLE', ...(statut === 'RESULTAT_DISPONIBLE' ? {} : {}) } }),
+        acceptees: await this.prisma.eegDemande.count({ where: { ...base, statut: { in: ['PLANIFIEE', 'EN_COURS', 'RESULTAT_DISPONIBLE'] } } }),
+        annulees: await this.prisma.eegDemande.count({ where: { ...base, statut: 'ANNULEE' } }),
+        enAttente: await this.prisma.eegDemande.count({ where: { ...base, statut: { in: ['CREEE', 'PLANIFIEE', 'EN_COURS'] } } }),
+      };
+    }
 
     const [recues, traitees, acceptees, annulees, enAttente] =
       await Promise.all([
-        this.prisma.eegDemande.count({ where }),
+        this.prisma.eegDemande.count({ where: base }),
         this.prisma.eegDemande.count({
-          where: { ...where, statut: 'RESULTAT_DISPONIBLE' },
+          where: { ...base, statut: 'RESULTAT_DISPONIBLE' },
         }),
-        // Acceptées = le technicien a donné suite (planifiée, réalisée ou
-        // archivée) — le pendant direct des refusées/annulées ci-dessous.
         this.prisma.eegDemande.count({
           where: {
-            ...where,
+            ...base,
             statut: { in: ['PLANIFIEE', 'EN_COURS', 'RESULTAT_DISPONIBLE'] },
           },
         }),
         this.prisma.eegDemande.count({
-          where: { ...where, statut: 'ANNULEE' },
+          where: { ...base, statut: 'ANNULEE' },
         }),
         this.prisma.eegDemande.count({
           where: {
-            ...where,
+            ...base,
             statut: { in: ['CREEE', 'PLANIFIEE', 'EN_COURS'] },
           },
         }),
@@ -82,21 +110,21 @@ export class RapportsController {
 
   @Get('delais')
   @ApiOperation({ summary: 'Délais moyens de traitement' })
-  @ApiQuery({
-    name: 'dateDebut',
-    required: false,
-    description: 'YYYY-MM-DD — pour une vue hebdomadaire ou mensuelle',
-  })
+  @ApiQuery({ name: 'dateDebut', required: false, description: 'YYYY-MM-DD' })
   @ApiQuery({ name: 'dateFin', required: false, description: 'YYYY-MM-DD' })
+  @ApiQuery({ name: 'typeEEG', required: false, enum: ['STANDARD', 'SOMMEIL', 'AMBULATOIRE', 'VIDEO_EEG'] })
+  @ApiQuery({ name: 'urgence', required: false, enum: ['STAT', 'URGENTE', 'NORMALE'] })
   async getDelais(
     @Query('dateDebut') dateDebut?: string,
     @Query('dateFin') dateFin?: string,
+    @Query('typeEEG') typeEEG?: TypeEEGFilter,
+    @Query('urgence') urgence?: UrgenceFilter,
   ) {
-    const periode = this.buildPeriodeWhere(dateDebut, dateFin);
+    const base = this.buildBaseWhere(dateDebut, dateFin, typeEEG, urgence);
     const demandes = await this.prisma.eegDemande.findMany({
       where: {
+        ...base,
         dateValidation: { not: null },
-        ...(periode ? { dateCreation: periode } : {}),
       },
       select: { dateCreation: true, dateValidation: true },
     });
@@ -118,22 +146,23 @@ export class RapportsController {
   @ApiOperation({
     summary: "Répartition démographique — sexe, âge, type d'examen",
     description:
-      "Chiffres calculés uniquement sur les patients ayant réellement passé un examen EEG (statut EN_COURS ou RESULTAT_DISPONIBLE) — une prescription refusée ou seulement planifiée n'est pas comptée, car le patient n'est pas encore passé dans le service. Croisé avec les données patient d'Accueil (récupérées en un seul appel). Filtrable par période pour couvrir un rapport hebdomadaire, mensuel ou personnalisé.",
+      "Chiffres calculés uniquement sur les patients ayant réellement passé un examen EEG. Filtrable par période, type EEG et sexe.",
   })
   @ApiQuery({ name: 'dateDebut', required: false, description: 'YYYY-MM-DD' })
   @ApiQuery({ name: 'dateFin', required: false, description: 'YYYY-MM-DD' })
+  @ApiQuery({ name: 'typeEEG', required: false, enum: ['STANDARD', 'SOMMEIL', 'AMBULATOIRE', 'VIDEO_EEG'] })
+  @ApiQuery({ name: 'sexe', required: false, enum: ['M', 'F'] })
   async getDemographie(
     @Query('dateDebut') dateDebut?: string,
     @Query('dateFin') dateFin?: string,
+    @Query('typeEEG') typeEEG?: TypeEEGFilter,
+    @Query('sexe') sexe?: SexeFilter,
   ) {
-    // Ne compte que les patients réellement passés dans le service EEG :
-    // examen réalisé (EN_COURS) ou résultat archivé (RESULTAT_DISPONIBLE).
-    // Une demande simplement créée, planifiée ou refusée/annulée ne
-    // représente pas un passage réel et ne doit pas gonfler ces chiffres.
     const periode = this.buildPeriodeWhere(dateDebut, dateFin);
     const where: Prisma.EegDemandeWhereInput = {
       statut: { in: ['EN_COURS', 'RESULTAT_DISPONIBLE'] },
       ...(periode ? { dateCreation: periode } : {}),
+      ...(typeEEG ? { typeEEG } : {}),
     };
 
     const [demandes, patients] = await Promise.all([
@@ -156,6 +185,9 @@ export class RapportsController {
 
     for (const patientId of patientsDistincts) {
       const patient = patientParId.get(patientId);
+
+      if (sexe && patient?.sexe !== sexe) continue;
+
       if (patient?.sexe === 'M') garcons++;
       else if (patient?.sexe === 'F') filles++;
       else sexeInconnu++;
@@ -190,17 +222,75 @@ export class RapportsController {
     };
   }
 
+  @Get('evolution')
+  @ApiOperation({ summary: 'Évolution temporelle des demandes EEG' })
+  @ApiQuery({ name: 'dateDebut', required: false, description: 'YYYY-MM-DD' })
+  @ApiQuery({ name: 'dateFin', required: false, description: 'YYYY-MM-DD' })
+  @ApiQuery({ name: 'typeEEG', required: false, enum: ['STANDARD', 'SOMMEIL', 'AMBULATOIRE', 'VIDEO_EEG'] })
+  @ApiQuery({ name: 'urgence', required: false, enum: ['STAT', 'URGENTE', 'NORMALE'] })
+  async getEvolution(
+    @Query('dateDebut') dateDebut?: string,
+    @Query('dateFin') dateFin?: string,
+    @Query('typeEEG') typeEEG?: TypeEEGFilter,
+    @Query('urgence') urgence?: UrgenceFilter,
+  ) {
+    const base = this.buildBaseWhere(dateDebut, dateFin, typeEEG, urgence);
+
+    const demandes = await this.prisma.eegDemande.findMany({
+      where: base,
+      select: { dateCreation: true, statut: true, typeEEG: true },
+      orderBy: { dateCreation: 'asc' },
+    });
+
+    const parJour: Record<string, { total: number; traitees: number; annulees: number }> = {};
+    for (const d of demandes) {
+      const jour = d.dateCreation.toISOString().slice(0, 10);
+      if (!parJour[jour]) parJour[jour] = { total: 0, traitees: 0, annulees: 0 };
+      parJour[jour].total++;
+      if (d.statut === 'RESULTAT_DISPONIBLE') parJour[jour].traitees++;
+      if (d.statut === 'ANNULEE') parJour[jour].annulees++;
+    }
+
+    const parTypeEEG: Record<string, Record<string, number>> = {};
+    for (const d of demandes) {
+      const jour = d.dateCreation.toISOString().slice(0, 10);
+      if (!parTypeEEG[d.typeEEG]) parTypeEEG[d.typeEEG] = {};
+      parTypeEEG[d.typeEEG][jour] = (parTypeEEG[d.typeEEG][jour] ?? 0) + 1;
+    }
+
+    return { parJour, parTypeEEG };
+  }
+
   @Get('anomalies')
   @ApiOperation({ summary: 'Résultats critiques' })
-  async getAnomalies() {
+  @ApiQuery({ name: 'dateDebut', required: false, description: 'YYYY-MM-DD' })
+  @ApiQuery({ name: 'dateFin', required: false, description: 'YYYY-MM-DD' })
+  @ApiQuery({ name: 'typeEEG', required: false, enum: ['STANDARD', 'SOMMEIL', 'AMBULATOIRE', 'VIDEO_EEG'] })
+  @ApiQuery({ name: 'statut', required: false, enum: ['CREEE', 'PLANIFIEE', 'EN_COURS', 'RESULTAT_DISPONIBLE', 'ANNULEE'] })
+  async getAnomalies(
+    @Query('dateDebut') dateDebut?: string,
+    @Query('dateFin') dateFin?: string,
+    @Query('typeEEG') typeEEG?: TypeEEGFilter,
+    @Query('statut') statut?: StatutFilter,
+  ) {
+    const demandeWhere: Prisma.EegDemandeWhereInput = {};
+    if (typeEEG) demandeWhere.typeEEG = typeEEG;
+    if (statut) demandeWhere.statut = statut;
+    const periode = this.buildPeriodeWhere(dateDebut, dateFin);
+    if (periode) demandeWhere.dateCreation = periode;
+
     const resultats = await this.prisma.eegResultat.findMany({
-      where: { estCritique: true },
+      where: {
+        estCritique: true,
+        ...(Object.keys(demandeWhere).length > 0 ? { demande: demandeWhere } : {}),
+      },
       include: {
         demande: {
           select: {
             numeroEEG: true,
             statut: true,
             patientId: true,
+            typeEEG: true,
           },
         },
       },
