@@ -170,19 +170,19 @@ export class DemandesService {
   async syncPendingPrescriptions(): Promise<number> {
     const [locales, flatDemandes] = await Promise.all([
       this.prisma.eegDemande.findMany({
-        select: { prescriptionParentId: true },
+        select: { prescriptionSourceId: true },
       }),
       this.prescriptionClient.listEegDemandes(),
     ]);
 
-    const parentIdsConnus = new Set(
+    const sourceIdsConnus = new Set(
       locales
-        .map((d) => d.prescriptionParentId)
+        .map((d) => d.prescriptionSourceId)
         .filter((v): v is string => !!v),
     );
 
     const nouvelles = flatDemandes.filter(
-      (d) => !parentIdsConnus.has(d.prescriptionParentId),
+      (d) => !sourceIdsConnus.has(d.id),
     );
 
     for (const d of nouvelles) {
@@ -508,7 +508,7 @@ export class DemandesService {
       .sendNotification({
         type: 'RESULTAT_DISPONIBLE',
         motif: `Résultat EEG disponible pour la demande ${demandeMaj.numeroEEG}`,
-        urgence: d.urgence === 'STAT' ? 3 : d.urgence === 'URGENTE' ? 2 : 1,
+        urgence: d.urgence,
         sourceServiceId: externalServicesConfig.eegServiceId,
         sourceServiceName: 'EEG',
         patientId: demandeMaj.patientId,

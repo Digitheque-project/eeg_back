@@ -16,15 +16,17 @@ export class NotificationExternalService {
 
   async sendNotification(dto: any): Promise<any> {
     try {
+      const notifyServiceDto = this.mapToNotifyServiceDto(dto);
+
       this.logger.log(
-        `📤 Envoi notification vers ${this.baseUrl}/notifications`,
+        `📤 Envoi notification vers ${this.baseUrl}/notifications/service`,
       );
-      this.logger.log(`📦 Payload: ${JSON.stringify(dto, null, 2)}`);
+      this.logger.log(`📦 Payload: ${JSON.stringify(notifyServiceDto, null, 2)}`);
 
       const response = await firstValueFrom(
         this.httpService.post<{ id?: string }>(
-          `${this.baseUrl}/notifications`,
-          dto,
+          `${this.baseUrl}/notifications/service`,
+          notifyServiceDto,
           {
             headers: { 'Content-Type': 'application/json' },
           },
@@ -45,5 +47,34 @@ export class NotificationExternalService {
       }
       return null;
     }
+  }
+
+  private mapToNotifyServiceDto(dto: any) {
+    const typeTitleMap: Record<string, string> = {
+      RESULTAT_DISPONIBLE: 'Nouveau résultat EEG disponible',
+      DEMANDE_CREEE: 'Nouvelle demande EEG',
+      DEMANDE_VALIDEE: 'Demande EEG validée',
+      DEMANDE_REJETEE: 'Demande EEG rejetée',
+    };
+
+    const typeLevelMap: Record<string, string> = {
+      STAT: 'urgent',
+      URGENTE: 'warning',
+    };
+
+    return {
+      serviceId: dto.sourceServiceId || externalServicesConfig.eegServiceId,
+      title: typeTitleMap[dto.type] || `Notification EEG – ${dto.type || 'info'}`,
+      message: dto.motif || '',
+      type: typeLevelMap[dto.urgence] || 'info',
+      source: 'eeg-back',
+      data: {
+        type: dto.type,
+        urgence: dto.urgence,
+        patientId: dto.patientId,
+        sourceServiceName: dto.sourceServiceName,
+        sentAt: dto.sentAt,
+      },
+    };
   }
 }

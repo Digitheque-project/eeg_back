@@ -9,6 +9,7 @@ import { getErrorMessage } from '../../common/utils/error.util';
 @Injectable()
 export class EegSchedulerService implements OnModuleInit {
   private readonly logger = new Logger(EegSchedulerService.name);
+  private isSyncingPrescriptions = false;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -41,8 +42,10 @@ export class EegSchedulerService implements OnModuleInit {
   // technicien n'existe qu'en mémoire côté service Prescription : elle est
   // invisible aux rapports (rapports.controller.ts) et à l'alerte STAT
   // ci-dessous, qui ne portent que sur la table locale.
-  @Cron(CronExpression.EVERY_MINUTE)
+  @Cron('*/5 * * * * *')
   async synchroniserPrescriptions() {
+    if (this.isSyncingPrescriptions) return;
+    this.isSyncingPrescriptions = true;
     try {
       const nb = await this.demandesService.syncPendingPrescriptions();
       this.logger.log(`Sync prescriptions : ${nb} nouvelle(s) (sur N reçues)`);
@@ -50,6 +53,8 @@ export class EegSchedulerService implements OnModuleInit {
       this.logger.warn(
         `Échec de synchronisation des prescriptions: ${getErrorMessage(err)}`,
       );
+    } finally {
+      this.isSyncingPrescriptions = false;
     }
   }
 
