@@ -262,14 +262,14 @@ export class DemandesService {
       this.prescriptionClient.listEegDemandes(),
     ]);
 
-    const parentIdsConnus = new Set(
+    const sourceIdsConnus = new Set(
       locales
-        .map((d) => d.prescriptionParentId)
+        .map((d) => d.prescriptionSourceId)
         .filter((v): v is string => !!v),
     );
 
     const virtuelles = flatDemandes
-      .filter((d) => !parentIdsConnus.has(d.prescriptionParentId))
+      .filter((d) => !sourceIdsConnus.has(d.id))
       .map((d) => this.buildVirtualDemande(d));
 
     const localesActives = locales.filter(
