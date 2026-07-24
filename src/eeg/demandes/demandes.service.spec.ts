@@ -121,7 +121,9 @@ describe('DemandesService', () => {
             prescripteurExterne: true,
             prescriptionParentId: 'rx-ext-001',
             prescriptionSourceId: 'dem-ext-001',
-            typeEEG: 'STANDARD',
+            // CHUA ne classe pas les examens par sous-type : la valeur
+            // externe ('STANDARD' ici) est ignorée, toujours 'EEG' en local.
+            typeEEG: 'EEG',
           }),
         }),
       );

@@ -18,15 +18,10 @@ export class ArchivesController {
   @ApiOperation({
     summary: 'Archives EEG — résultats validés',
     description:
-      'Retourne uniquement les résultats validés (estImmutable=true). Filtrable par patient, date, type EEG, conclusion, numéro EEG.',
+      'Retourne uniquement les résultats validés (estImmutable=true). Filtrable par patient, date, conclusion, numéro EEG.',
   })
   @ApiQuery({ name: 'patientId', required: false })
   @ApiQuery({ name: 'numeroEEG', required: false })
-  @ApiQuery({
-    name: 'typeEEG',
-    required: false,
-    enum: ['STANDARD', 'SOMMEIL', 'AMBULATOIRE', 'VIDEO_EEG'],
-  })
   @ApiQuery({ name: 'dateDebut', required: false, description: 'YYYY-MM-DD' })
   @ApiQuery({ name: 'dateFin', required: false, description: 'YYYY-MM-DD' })
   @ApiQuery({
@@ -47,7 +42,6 @@ export class ArchivesController {
   async getArchives(
     @Query('patientId') patientId?: string,
     @Query('numeroEEG') numeroEEG?: string,
-    @Query('typeEEG') typeEEG?: string,
     @Query('dateDebut') dateDebut?: string,
     @Query('dateFin') dateFin?: string,
     @Query('conclusion') conclusion?: string,
@@ -64,7 +58,6 @@ export class ArchivesController {
     };
 
     if (patientId) where.demande.patientId = patientId;
-    if (typeEEG) where.demande.typeEEG = typeEEG;
     if (numeroEEG) where.demande.numeroEEG = { contains: numeroEEG };
     if (dateDebut || dateFin) {
       where.dateValidation = {};
@@ -141,11 +134,6 @@ export class ArchivesController {
   })
   @ApiQuery({ name: 'patientId', required: false })
   @ApiQuery({ name: 'numeroEEG', required: false })
-  @ApiQuery({
-    name: 'typeEEG',
-    required: false,
-    enum: ['STANDARD', 'SOMMEIL', 'AMBULATOIRE', 'VIDEO_EEG'],
-  })
   @ApiQuery({ name: 'dateDebut', required: false, description: 'YYYY-MM-DD' })
   @ApiQuery({ name: 'dateFin', required: false, description: 'YYYY-MM-DD' })
   @ApiQuery({ name: 'page', required: false, description: 'Page (défaut 1)' })
@@ -157,7 +145,6 @@ export class ArchivesController {
   async getArchivesAnnulees(
     @Query('patientId') patientId?: string,
     @Query('numeroEEG') numeroEEG?: string,
-    @Query('typeEEG') typeEEG?: string,
     @Query('dateDebut') dateDebut?: string,
     @Query('dateFin') dateFin?: string,
     @Query('page') page?: string,
@@ -169,8 +156,6 @@ export class ArchivesController {
 
     const where: Prisma.EegDemandeWhereInput = { statut: 'ANNULEE' };
     if (patientId) where.patientId = patientId;
-    if (typeEEG)
-      where.typeEEG = typeEEG as Prisma.EegDemandeWhereInput['typeEEG'];
     if (numeroEEG) where.numeroEEG = { contains: numeroEEG };
     if (dateDebut || dateFin) {
       where.dateCreation = {};

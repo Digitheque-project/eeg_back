@@ -20,6 +20,7 @@ enum TypeEEG {
   SOMMEIL
   AMBULATOIRE
   VIDEO_EEG
+  EEG
 }
 
 enum NiveauUrgence {

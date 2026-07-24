@@ -101,7 +101,9 @@ export class DemandesService {
       prescripteurExternePrenom: p.prescripteurPrenomManuel ?? null,
       prescripteurExterne: p.prescripteurExterne ?? false,
       technicienId: null as string | null,
-      typeEEG: p.typeEEG,
+      // CHUA ne classe pas les examens EEG par sous-type — on ignore la
+      // valeur externe et on force le type générique unique.
+      typeEEG: 'EEG' as const,
       urgence: p.urgence ?? 'NORMALE',
       motifPrescription: p.renseignements ?? '',
       statut: 'CREEE' as const,
@@ -140,7 +142,9 @@ export class DemandesService {
           prescripteurExterneNom: resolved.prescripteurExterneNom,
           prescripteurExternePrenom: resolved.prescripteurExternePrenom,
           prescripteurExterne: p.prescripteurExterne ?? false,
-          typeEEG: p.typeEEG,
+          // CHUA ne classe pas les examens EEG par sous-type — on ignore la
+          // valeur externe et on force le type générique unique.
+          typeEEG: 'EEG',
           urgence: p.urgence || 'NORMALE',
           motifPrescription: p.renseignements ?? '',
           episodeSoinsId: p.chuId || `EXTERNAL-${Date.now()}`,
