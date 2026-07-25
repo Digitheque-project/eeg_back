@@ -19,9 +19,9 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Installer les dépendances de production uniquement
+# Installer les dépendances de production uniquement (sans lancer les scripts postinstall)
 COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev --ignore-scripts
 
 # Copier le code buildé et les migrations depuis l'étape builder
 COPY --from=builder /app/dist ./dist
