@@ -1,5 +1,5 @@
 # ---- Étape 1 : Build ----
-FROM node:20-alpine AS builder
+FROM node:20-slim AS builder
 
 WORKDIR /app
 
@@ -15,9 +15,12 @@ RUN npx prisma generate
 RUN npm run build
 
 # ---- Étape 2 : Production ----
-FROM node:20-alpine
+FROM node:20-slim
 
 WORKDIR /app
+
+# Installer curl (Debian)
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
 # Installer les dépendances de production uniquement (sans lancer les scripts postinstall)
 COPY package.json package-lock.json* ./
@@ -29,9 +32,6 @@ COPY --from=builder /app/prisma ./prisma
 
 # Générer le client Prisma pour la production
 RUN npx prisma generate
-
-# Installer curl pour les health checks
-RUN apk add --no-cache curl
 
 EXPOSE 3001
 
