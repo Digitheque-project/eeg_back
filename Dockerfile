@@ -33,7 +33,11 @@ COPY --from=builder /app/prisma ./prisma
 # Générer le client Prisma pour la production
 RUN npx prisma generate
 
+# Copier l'entrypoint
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
 EXPOSE 3001
 
 # Lancer les migrations puis démarrer le serveur
-CMD sh -c "npx prisma migrate deploy && node dist/src/main"
+CMD ["/app/entrypoint.sh"]
