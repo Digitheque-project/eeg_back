@@ -3,9 +3,9 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Installer les dépendances
+# Installer les dépendances (sans postinstall — le schema n'existe pas encore)
 COPY package.json package-lock.json* ./
-RUN npm ci
+RUN npm ci --ignore-scripts
 
 # Copier le reste du code
 COPY . .
