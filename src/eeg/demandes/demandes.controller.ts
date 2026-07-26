@@ -12,6 +12,7 @@ import { DemandesService } from './demandes.service';
 import { PlanifierRdvDto } from './dto/planifier-rdv.dto';
 import { ArchiverResultatDto } from './dto/archiver-resultat.dto';
 import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
+import { BearerToken } from '../../common/decorators/bearer-token.decorator';
 
 @ApiTags('Demandes')
 @Controller('eeg/demandes')
@@ -23,9 +24,10 @@ export class DemandesController {
   getWorklist(
     @Request() req: AuthenticatedRequest,
     @Query('role') roleParam?: string,
+    @BearerToken() token?: string,
   ) {
     const role = roleParam || req.user?.role;
-    return this.demandesService.getWorklist(role ?? '');
+    return this.demandesService.getWorklist(role ?? '', token);
   }
 
   @Get('patient/:patientId')
@@ -37,14 +39,18 @@ export class DemandesController {
   @Get(':id')
   @ApiOperation({ summary: "Détail d'une demande EEG" })
   @ApiParam({ name: 'id' })
-  getDemandeById(@Param('id') id: string) {
-    return this.demandesService.getDemandeById(id);
+  getDemandeById(@Param('id') id: string, @BearerToken() token?: string) {
+    return this.demandesService.getDemandeById(id, token);
   }
 
   @Patch(':id/annuler')
   @ApiOperation({ summary: 'Annuler une demande EEG' })
-  annulerDemande(@Param('id') id: string, @Body('motif') motif: string) {
-    return this.demandesService.annulerDemande(id, motif);
+  annulerDemande(
+    @Param('id') id: string,
+    @Body('motif') motif: string,
+    @BearerToken() token?: string,
+  ) {
+    return this.demandesService.annulerDemande(id, motif, token);
   }
 
   // RÈGLE MÉTIER — à faire respecter par le RolesGuard en Phase 6
@@ -59,9 +65,10 @@ export class DemandesController {
     @Param('id') id: string,
     @Body('motif') motif: string,
     @Request() req: AuthenticatedRequest,
+    @BearerToken() token?: string,
   ) {
     const technicienId = req.user!.id;
-    return this.demandesService.refuserDemande(id, motif, technicienId);
+    return this.demandesService.refuserDemande(id, motif, technicienId, token);
   }
 
   // RÈGLE MÉTIER — à faire respecter par le RolesGuard en Phase 6
@@ -75,9 +82,10 @@ export class DemandesController {
     @Param('id') id: string,
     @Body() dto: PlanifierRdvDto,
     @Request() req: AuthenticatedRequest,
+    @BearerToken() token?: string,
   ) {
     const technicienId = req.user!.id;
-    return this.demandesService.planifierRdv(id, dto, technicienId);
+    return this.demandesService.planifierRdv(id, dto, technicienId, token);
   }
 
   // RÈGLE MÉTIER — à faire respecter par le RolesGuard en Phase 6
@@ -92,9 +100,10 @@ export class DemandesController {
   realiserDemande(
     @Param('id') id: string,
     @Request() req: AuthenticatedRequest,
+    @BearerToken() token?: string,
   ) {
     const technicienId = req.user!.id;
-    return this.demandesService.realiserDemande(id, technicienId);
+    return this.demandesService.realiserDemande(id, technicienId, token);
   }
 
   // RÈGLE MÉTIER — à faire respecter par le RolesGuard en Phase 6

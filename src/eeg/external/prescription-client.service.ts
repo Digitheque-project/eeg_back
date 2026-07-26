@@ -5,9 +5,11 @@ import { getErrorMessage } from '../../common/utils/error.util';
 import { externalServicesConfig } from '../../common/config/external-services.config';
 
 // ─── Shape réelle retournée par GET /prescriptions/eeg ──────────────
-// Le endpoint renvoie des prescriptions parents, chacune contenant un
-// tableau demandes[] de demandes EEG individuelles.
-// Conforme au Swagger de prescription_back (juillet 2026).
+// Contrairement à d'autres domaines de prescription_back (anapath,
+// endoscopie, orl...), le modèle Prisma PrescriptionEEG n'a AUCUNE relation
+// demandes[] — chaque prescription EEG est un examen unique, à plat.
+// Vérifié le 27/07/2026 contre le schema.prisma réel et une réponse GET
+// live : la clé `demandes` est absente de chaque enregistrement.
 export interface PrescriptionEegRawDto {
   id: string;
   patientId: string;
@@ -33,30 +35,22 @@ export interface PrescriptionEegRawDto {
   serviceIdDest?: string;
   createdAt?: string;
   updatedAt?: string;
+  statut?: string;
   statutSync?: string | null;
   syncError?: string | null;
   syncedAt?: string | null;
   syncTentatives?: number;
-  demandes: PrescriptionDemandeeRaw[];
 }
 
-export interface PrescriptionDemandeeRaw {
-  id: string;
-  prescriptionId?: string;
-  typeEEG: string;
-  statut?: string;
-  motifRefus?: string;
-}
-
-// ─── Forme aplatie consommée par eeg_back ──────────────────────────
-// Chaque élément de demandes[] est aplati en un objet portant les champs
-// communs de la prescription parente + les champs propres de la demande.
-// Les noms de champs ci-dessous sont les noms INTERNES utilisés par
-// demandes.service.ts (buildVirtualDemande, promoteToLocal, aUnPrescripteur).
+// ─── Forme consommée par eeg_back ──────────────────────────────────
+// Un objet par prescription EEG reçue (id = prescriptionParentId, le
+// modèle étant plat côté prescription_back). Les noms de champs
+// ci-dessous sont les noms INTERNES utilisés par demandes.service.ts
+// (buildVirtualDemande, promoteToLocal, aUnPrescripteur).
 export interface PrescriptionEegDemandeFlat {
-  /** ID de la demande individuelle (prescription_back.demandes[].id) */
+  /** ID de la prescription EEG (prescription_back.PrescriptionEEG.id) */
   id: string;
-  /** ID de la prescription parente (prescription_back.prescription.id) */
+  /** Identique à `id` — conservé pour compatibilité avec demandes.service.ts */
   prescriptionParentId: string;
   patientId: string;
   prescripteurId: string;
@@ -75,7 +69,8 @@ export interface PrescriptionEegDemandeFlat {
   renseignements?: string;
   alertes?: string;
   remarques?: string;
-  typeEEG: 'STANDARD' | 'SOMMEIL' | 'AMBULATOIRE' | 'VIDEO_EEG';
+  /** CHUA ne classe pas les examens EEG par sous-type — toujours 'EEG' */
+  typeEEG: string;
   chuId?: string;
   serviceIdSource?: string;
   serviceIdDest?: string;
@@ -106,27 +101,25 @@ function normaliserUrgence(
 function flattenPrescriptions(
   raw: PrescriptionEegRawDto[],
 ): PrescriptionEegDemandeFlat[] {
-  return raw.flatMap((rx) =>
-    (rx.demandes ?? []).map((d) => ({
-      id: d.id,
-      prescriptionParentId: d.prescriptionId ?? rx.id,
-      patientId: rx.patientId,
-      prescripteurId: rx.prescripteurId,
-      prescripteurNomManuel: rx.nomMedecinPrescripteur,
-      prescripteurPrenomManuel: undefined, // TODO: pas de source dans payload réel
-      prescripteurExterne: !rx.prescripteurId && !!rx.nomMedecinPrescripteur,
-      numeroONM: rx.numeroONM,
-      urgence: normaliserUrgence(rx.urgence),
-      renseignements: rx.renseignements,
-      alertes: rx.alertes,
-      remarques: rx.remarques,
-      typeEEG: d.typeEEG as PrescriptionEegDemandeFlat['typeEEG'],
-      chuId: rx.chuId,
-      serviceIdSource: rx.serviceIdSource,
-      serviceIdDest: rx.serviceIdDest,
-      createdAt: rx.createdAt,
-    })),
-  );
+  return raw.map((rx) => ({
+    id: rx.id,
+    prescriptionParentId: rx.id,
+    patientId: rx.patientId,
+    prescripteurId: rx.prescripteurId,
+    prescripteurNomManuel: rx.nomMedecinPrescripteur,
+    prescripteurPrenomManuel: undefined, // TODO: pas de source dans payload réel
+    prescripteurExterne: !rx.prescripteurId && !!rx.nomMedecinPrescripteur,
+    numeroONM: rx.numeroONM,
+    urgence: normaliserUrgence(rx.urgence),
+    renseignements: rx.renseignements,
+    alertes: rx.alertes,
+    remarques: rx.remarques,
+    typeEEG: 'EEG',
+    chuId: rx.chuId,
+    serviceIdSource: rx.serviceIdSource,
+    serviceIdDest: rx.serviceIdDest,
+    createdAt: rx.createdAt,
+  }));
 }
 
 @Injectable()
@@ -156,6 +149,7 @@ export class PrescriptionClientService {
   async listEegDemandes(
     serviceIdDest: string = this.serviceId,
     chuId: string = this.chuId,
+    overrideToken?: string,
   ): Promise<PrescriptionEegDemandeFlat[]> {
     try {
       const response = await firstValueFrom(
@@ -166,7 +160,7 @@ export class PrescriptionClientService {
             timeout: 20000,
             headers: {
               'Content-Type': 'application/json',
-              Authorization: `Bearer ${this.token}`,
+              Authorization: `Bearer ${overrideToken ?? this.token}`,
             },
           },
         ),
@@ -197,15 +191,22 @@ export class PrescriptionClientService {
    */
   async findDemandeEegById(
     id: string,
+    overrideToken?: string,
   ): Promise<PrescriptionEegDemandeFlat | null> {
-    const demandes = await this.listEegDemandes();
+    const demandes = await this.listEegDemandes(
+      this.serviceId,
+      this.chuId,
+      overrideToken,
+    );
     return demandes.find((d) => d.id === id) ?? null;
   }
 
   /**
-   * Répercute un changement de statut EEG sur la demande individuelle
-   * dans prescription_back. Le endpoint cible identifie la demande par
-   * l'id de la prescription parente + l'id de la demande.
+   * Répercute un changement de statut EEG sur la prescription dans
+   * prescription_back (PATCH /eeg/{id}/statut — modèle plat, pas de
+   * sous-ressource demandes). `demandeId` vaut toujours `prescriptionId`
+   * dans ce domaine ; le paramètre est conservé pour ne pas changer la
+   * signature côté demandes.service.ts.
    * Defensive — never throws.
    */
   async updateDemandeStatut(
@@ -216,8 +217,8 @@ export class PrescriptionClientService {
   ): Promise<void> {
     try {
       await firstValueFrom(
-        this.httpService.put(
-          `${this.baseUrl}/eeg/${prescriptionId}/demandes/${demandeId}/statut`,
+        this.httpService.patch(
+          `${this.baseUrl}/eeg/${prescriptionId}/statut`,
           { statut, ...(motif ? { motif } : {}) },
           {
             timeout: 20000,

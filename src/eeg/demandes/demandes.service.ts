@@ -225,7 +225,7 @@ export class DemandesService {
   }
 
   // ─── Résolution ID → demande locale ou promotion ──────────────────
-  private async resolveOrPromote(id: string) {
+  private async resolveOrPromote(id: string, token?: string) {
     const local = await this.prisma.eegDemande.findFirst({
       where: { OR: [{ id }, { prescriptionSourceId: id }] },
       include: { rdv: true },
@@ -233,7 +233,7 @@ export class DemandesService {
     if (local) return local;
 
     const demande =
-      await this.prescriptionClient.findDemandeEegById(id);
+      await this.prescriptionClient.findDemandeEegById(id, token);
     if (!demande) throw new NotFoundException(`Demande ${id} introuvable`);
     return this.promoteToLocal(demande);
   }
@@ -253,7 +253,7 @@ export class DemandesService {
     return false;
   }
 
-  async getWorklist(role: string) {
+  async getWorklist(role: string, token?: string) {
     if (!['TECHNICIEN', 'CHEF_SERVICE', 'MAJOR_SERVICE'].includes(role)) {
       return { message: 'Rôle non reconnu' };
     }
@@ -263,7 +263,7 @@ export class DemandesService {
         include: { resultat: true, rdv: true },
         orderBy: { dateCreation: 'desc' },
       }),
-      this.prescriptionClient.listEegDemandes(),
+      this.prescriptionClient.listEegDemandes(undefined, undefined, token),
     ]);
 
     const sourceIdsConnus = new Set(
@@ -296,7 +296,7 @@ export class DemandesService {
   }
 
   // ─── Détail d'une demande ─────────────────────────────────────────
-  async getDemandeById(id: string) {
+  async getDemandeById(id: string, token?: string) {
     const local = await this.prisma.eegDemande.findFirst({
       where: { OR: [{ id }, { prescriptionSourceId: id }] },
       include: { resultat: true, rdv: true },
@@ -307,7 +307,7 @@ export class DemandesService {
     }
 
     const demande =
-      await this.prescriptionClient.findDemandeEegById(id);
+      await this.prescriptionClient.findDemandeEegById(id, token);
     if (!demande) throw new NotFoundException(`Demande ${id} introuvable`);
     const avecPatient = await this.patientLookup.attachPatientInfo(
       this.buildVirtualDemande(demande),
@@ -325,9 +325,14 @@ export class DemandesService {
   }
 
   // ─── Actions sur les demandes ─────────────────────────────────────
-  async refuserDemande(id: string, motif: string, technicienId: string) {
+  async refuserDemande(
+    id: string,
+    motif: string,
+    technicienId: string,
+    token?: string,
+  ) {
     if (!motif?.trim()) throw new BadRequestException('Motif obligatoire');
-    const d = await this.resolveOrPromote(id);
+    const d = await this.resolveOrPromote(id, token);
     if (d.statut !== 'CREEE')
       throw new BadRequestException(`Statut invalide: ${d.statut}`);
     const demandeMaj = await this.prisma.eegDemande.update({
@@ -343,9 +348,9 @@ export class DemandesService {
     return demandeMaj;
   }
 
-  async annulerDemande(id: string, motif: string) {
+  async annulerDemande(id: string, motif: string, token?: string) {
     if (!motif?.trim()) throw new BadRequestException('Motif obligatoire');
-    const d = await this.resolveOrPromote(id);
+    const d = await this.resolveOrPromote(id, token);
     if (['ANNULEE', 'RESULTAT_DISPONIBLE'].includes(d.statut)) {
       throw new BadRequestException(
         `Impossible d'annuler une demande ${d.statut}`,
@@ -364,8 +369,13 @@ export class DemandesService {
     return demandeMaj;
   }
 
-  async planifierRdv(id: string, dto: PlanifierRdvDto, technicienId: string) {
-    const d = await this.resolveOrPromote(id);
+  async planifierRdv(
+    id: string,
+    dto: PlanifierRdvDto,
+    technicienId: string,
+    token?: string,
+  ) {
+    const d = await this.resolveOrPromote(id, token);
     if (d.statut !== 'CREEE')
       throw new BadRequestException(`Statut invalide: ${d.statut}`);
 
@@ -419,8 +429,8 @@ export class DemandesService {
     return demandeMaj;
   }
 
-  async realiserDemande(id: string, techId: string) {
-    const d = await this.resolveOrPromote(id);
+  async realiserDemande(id: string, techId: string, token?: string) {
+    const d = await this.resolveOrPromote(id, token);
     if (!(
       (d.statut === 'CREEE' && d.urgence === 'STAT') ||
       d.statut === 'PLANIFIEE'

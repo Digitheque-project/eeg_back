@@ -13,7 +13,7 @@ describe('PrescriptionClientService', () => {
         PrescriptionClientService,
         {
           provide: HttpService,
-          useValue: { get: jest.fn() },
+          useValue: { get: jest.fn(), patch: jest.fn() },
         },
       ],
     }).compile();
@@ -26,8 +26,8 @@ describe('PrescriptionClientService', () => {
     expect(service).toBeDefined();
   });
 
-  describe('listEegDemandes — flattenPrescriptions', () => {
-    it('should flatten a prescription with 2 demandes of different typeEEGs', async () => {
+  describe('listEegDemandes — flattenPrescriptions (modèle plat, sans demandes[])', () => {
+    it('should map each raw prescription to one flat demande', async () => {
       const rawResponse = {
         data: [
           {
@@ -43,10 +43,6 @@ describe('PrescriptionClientService', () => {
             serviceIdSource: 'srv-001',
             serviceIdDest: 'srv-002',
             createdAt: '2026-07-15T08:00:00Z',
-            demandes: [
-              { id: 'dem-001', prescriptionId: 'rx-001', typeEEG: 'STANDARD', statut: 'EN_ATTENTE' },
-              { id: 'dem-002', prescriptionId: 'rx-001', typeEEG: 'SOMMEIL', statut: 'EN_ATTENTE', motifRefus: null },
-            ],
           },
         ],
       };
@@ -55,10 +51,9 @@ describe('PrescriptionClientService', () => {
 
       const result = await service.listEegDemandes();
 
-      expect(result).toHaveLength(2);
-
+      expect(result).toHaveLength(1);
       expect(result[0]).toMatchObject({
-        id: 'dem-001',
+        id: 'rx-001',
         prescriptionParentId: 'rx-001',
         patientId: 'PAT-001',
         prescripteurId: '',
@@ -66,15 +61,9 @@ describe('PrescriptionClientService', () => {
         prescripteurPrenomManuel: undefined,
         prescripteurExterne: true,
         numeroONM: 'ONM-12345',
-        typeEEG: 'STANDARD',
+        typeEEG: 'EEG',
         urgence: 'URGENTE',
         renseignements: 'Épilepsie réfractaire',
-      });
-
-      expect(result[1]).toMatchObject({
-        id: 'dem-002',
-        prescriptionParentId: 'rx-001',
-        typeEEG: 'SOMMEIL',
       });
     });
 
@@ -96,15 +85,11 @@ describe('PrescriptionClientService', () => {
       expect(result).toEqual([]);
     });
 
-    it('should handle a prescription with no demandes gracefully', async () => {
+    it('should map several prescriptions to several flat demandes, one each', async () => {
       const rawResponse = {
         data: [
-          {
-            id: 'rx-002',
-            patientId: 'PAT-002',
-            prescripteurId: 'ext-doc-002',
-            demandes: [],
-          },
+          { id: 'rx-002', patientId: 'PAT-002', prescripteurId: 'ext-doc-002' },
+          { id: 'rx-003', patientId: 'PAT-003', prescripteurId: 'ext-doc-003' },
         ],
       };
 
@@ -112,75 +97,68 @@ describe('PrescriptionClientService', () => {
 
       const result = await service.listEegDemandes();
 
-      expect(result).toEqual([]);
-    });
-
-    it('should use d.prescriptionId over rx.id when present', async () => {
-      const rawResponse = {
-        data: [
-          {
-            id: 'rx-parent-001',
-            patientId: 'PAT-003',
-            prescripteurId: 'doc-003',
-            demandes: [
-              { id: 'dem-010', prescriptionId: 'rx-override-001', typeEEG: 'AMBULATOIRE' },
-              { id: 'dem-011', typeEEG: 'STANDARD' },
-            ],
-          },
-        ],
-      };
-
-      jest.spyOn(httpService, 'get').mockReturnValue(of(rawResponse as any));
-
-      const result = await service.listEegDemandes();
-
-      expect(result[0].prescriptionParentId).toBe('rx-override-001');
-      expect(result[1].prescriptionParentId).toBe('rx-parent-001');
+      expect(result).toHaveLength(2);
+      expect(result[0].id).toBe('rx-002');
+      expect(result[0].prescriptionParentId).toBe('rx-002');
+      expect(result[1].id).toBe('rx-003');
+      expect(result[1].prescriptionParentId).toBe('rx-003');
     });
   });
 
   describe('findDemandeEegById', () => {
-    it('should return the matching flat demand by id', async () => {
+    it('should return the matching flat demande by id', async () => {
       const rawResponse = {
         data: [
-          {
-            id: 'rx-001',
-            patientId: 'PAT-001',
-            prescripteurId: 'ext-001',
-            demandes: [
-              { id: 'dem-001', typeEEG: 'STANDARD' },
-              { id: 'dem-002', typeEEG: 'VIDEO_EEG' },
-            ],
-          },
+          { id: 'rx-001', patientId: 'PAT-001', prescripteurId: 'ext-001' },
+          { id: 'rx-002', patientId: 'PAT-002', prescripteurId: 'ext-002' },
         ],
       };
 
       jest.spyOn(httpService, 'get').mockReturnValue(of(rawResponse as any));
 
-      const result = await service.findDemandeEegById('dem-002');
+      const result = await service.findDemandeEegById('rx-002');
 
       expect(result).not.toBeNull();
-      expect(result!.id).toBe('dem-002');
-      expect(result!.typeEEG).toBe('VIDEO_EEG');
+      expect(result!.id).toBe('rx-002');
+      expect(result!.prescriptionParentId).toBe('rx-002');
     });
 
     it('should return null for unknown id', async () => {
       const rawResponse = {
-        data: [
-          {
-            id: 'rx-001',
-            patientId: 'PAT-001',
-            prescripteurId: 'ext-001',
-            demandes: [{ id: 'dem-001', typeEEG: 'STANDARD' }],
-          },
-        ],
+        data: [{ id: 'rx-001', patientId: 'PAT-001', prescripteurId: 'ext-001' }],
       };
 
       jest.spyOn(httpService, 'get').mockReturnValue(of(rawResponse as any));
 
-      const result = await service.findDemandeEegById('dem-999');
+      const result = await service.findDemandeEegById('rx-999');
 
       expect(result).toBeNull();
+    });
+  });
+
+  describe('updateDemandeStatut', () => {
+    it('should PATCH /eeg/{id}/statut (route plate, pas de sous-ressource demandes)', async () => {
+      const patchSpy = jest
+        .spyOn(httpService, 'patch')
+        .mockReturnValue(of({ data: {} } as any));
+
+      await service.updateDemandeStatut('rx-001', 'rx-001', 'EN_COURS', 'motif');
+
+      expect(patchSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/\/eeg\/rx-001\/statut$/),
+        { statut: 'EN_COURS', motif: 'motif' },
+        expect.any(Object),
+      );
+    });
+
+    it('should not throw on API error', async () => {
+      jest
+        .spyOn(httpService, 'patch')
+        .mockReturnValue(throwError(() => new Error('down')));
+
+      await expect(
+        service.updateDemandeStatut('rx-001', 'rx-001', 'EN_COURS'),
+      ).resolves.toBeUndefined();
     });
   });
 });
