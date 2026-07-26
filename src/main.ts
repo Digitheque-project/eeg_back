@@ -21,11 +21,9 @@ async function bootstrap() {
   app.useGlobalFilters(new HttpExceptionFilter());
 
   // CORS pour le frontend Next.js
-  const corsOrigins = process.env.CORS_ORIGIN
-    ? process.env.CORS_ORIGIN.split(',')
-    : ['*'];
+  const corsOrigin = process.env.CORS_ORIGIN || '*';
   app.enableCors({
-    origin: corsOrigins,
+    origin: corsOrigin,
     methods: ['GET', 'POST', 'PATCH', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
