@@ -20,7 +20,10 @@ describe('DemandesService', () => {
       create: jest.fn(),
       update: jest.fn(),
     },
-    eegNotification: { create: jest.fn() },
+    eegNotification: {
+      create: jest.fn(),
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
     eegRdv: { create: jest.fn(), findFirst: jest.fn().mockResolvedValue(null) },
     eegResultat: { findUnique: jest.fn().mockResolvedValue(null), create: jest.fn(), update: jest.fn() },
     $transaction: jest.fn().mockImplementation((fns: any) => {
@@ -209,6 +212,96 @@ describe('DemandesService', () => {
             prescripteurExterne: false,
           }),
         }),
+      );
+    });
+  });
+
+  // getWorklist doit désormais promouvoir + notifier immédiatement toute
+  // nouvelle prescription (avec le token de l'utilisateur connecté),
+  // au lieu de se contenter de l'afficher de façon éphémère sans jamais
+  // créer de notification — c'était le bug remonté par l'utilisateur
+  // ("la prescription apparaît dans la worklist mais pas de notification").
+  describe('getWorklist', () => {
+    const localApresPromotion = {
+      id: 'local-100',
+      numeroEEG: 'EEG-100',
+      patientId: 'PAT-100',
+      prescripteurId: 'doc-1',
+      statut: 'CREEE',
+      urgence: 'NORMALE',
+      dateCreation: new Date(),
+      resultat: null,
+      rdv: null,
+    };
+
+    it('should promote and notify a new prescription seen for the first time', async () => {
+      prisma.eegDemande.findMany
+        .mockResolvedValueOnce([]) // aucune demande locale connue
+        .mockResolvedValueOnce([localApresPromotion]); // après promotion
+
+      prisma.eegDemande.create.mockResolvedValue(localApresPromotion);
+      prisma.eegNotification.findFirst.mockResolvedValue(null);
+      prisma.eegNotification.create.mockResolvedValue({});
+
+      prescriptionClient.listEegDemandes.mockResolvedValue([
+        {
+          id: 'dem-100',
+          prescriptionParentId: 'rx-100',
+          patientId: 'PAT-100',
+          prescripteurId: 'doc-1',
+          typeEEG: 'EEG',
+          urgence: 'NORMALE',
+        },
+      ]);
+
+      const result = await service.getWorklist('TECHNICIEN');
+
+      expect(prisma.eegDemande.create).toHaveBeenCalled();
+      expect(prisma.eegNotification.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            type: 'NOUVELLE_DEMANDE',
+            demandeId: 'local-100',
+          }),
+        }),
+      );
+      expect(result.toutes).toHaveLength(1);
+    });
+
+    it('should not create a duplicate notification if one already exists for this demande', async () => {
+      prisma.eegDemande.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([localApresPromotion]);
+
+      prisma.eegDemande.create.mockResolvedValue(localApresPromotion);
+      prisma.eegNotification.findFirst.mockResolvedValue({ id: 'notif-existante' });
+
+      prescriptionClient.listEegDemandes.mockResolvedValue([
+        {
+          id: 'dem-100',
+          prescriptionParentId: 'rx-100',
+          patientId: 'PAT-100',
+          prescripteurId: 'doc-1',
+          typeEEG: 'EEG',
+          urgence: 'NORMALE',
+        },
+      ]);
+
+      await service.getWorklist('TECHNICIEN');
+
+      expect(prisma.eegNotification.create).not.toHaveBeenCalled();
+    });
+
+    it('should pass the connected user token through to listEegDemandes', async () => {
+      prisma.eegDemande.findMany.mockResolvedValue([]);
+      prescriptionClient.listEegDemandes.mockResolvedValue([]);
+
+      await service.getWorklist('TECHNICIEN', 'fresh-user-token');
+
+      expect(prescriptionClient.listEegDemandes).toHaveBeenCalledWith(
+        undefined,
+        undefined,
+        'fresh-user-token',
       );
     });
   });

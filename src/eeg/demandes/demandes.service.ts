@@ -170,27 +170,26 @@ export class DemandesService {
     }
   }
 
-  // ─── Sync des prescriptions en attente ────────────────────────────
-  async syncPendingPrescriptions(): Promise<number> {
-    const [locales, flatDemandes] = await Promise.all([
-      this.prisma.eegDemande.findMany({
-        select: { prescriptionSourceId: true },
-      }),
-      this.prescriptionClient.listEegDemandes(),
-    ]);
-
-    const sourceIdsConnus = new Set(
-      locales
-        .map((d) => d.prescriptionSourceId)
-        .filter((v): v is string => !!v),
-    );
-
-    const nouvelles = flatDemandes.filter(
-      (d) => !sourceIdsConnus.has(d.id),
-    );
+  // ─── Promotion + notification des demandes pas encore connues ─────
+  // Partagé entre le cron de fond (syncPendingPrescriptions, token
+  // statique) et getWorklist (token de l'utilisateur connecté).
+  // Idempotent : une notification NOUVELLE_DEMANDE n'est jamais recréée
+  // pour une demande déjà notifiée (protège contre les doubles appels
+  // concurrents du cron et de getWorklist sur la même fenêtre).
+  private async promouvoirNouvelles(
+    flatDemandes: PrescriptionEegDemandeFlat[],
+    sourceIdsConnus: Set<string>,
+  ): Promise<number> {
+    const nouvelles = flatDemandes.filter((d) => !sourceIdsConnus.has(d.id));
 
     for (const d of nouvelles) {
       const demande = await this.promoteToLocal(d);
+
+      const dejaNotifie = await this.prisma.eegNotification.findFirst({
+        where: { demandeId: demande.id, type: 'NOUVELLE_DEMANDE' },
+      });
+      if (dejaNotifie) continue;
+
       this.logger.log(
         `🔔 Notification locale pour ${demande.numeroEEG} (typeEEG: ${demande.typeEEG})`,
       );
@@ -206,6 +205,24 @@ export class DemandesService {
       });
     }
     return nouvelles.length;
+  }
+
+  // ─── Sync des prescriptions en attente (cron, token statique) ──────
+  async syncPendingPrescriptions(): Promise<number> {
+    const [locales, flatDemandes] = await Promise.all([
+      this.prisma.eegDemande.findMany({
+        select: { prescriptionSourceId: true },
+      }),
+      this.prescriptionClient.listEegDemandes(),
+    ]);
+
+    const sourceIdsConnus = new Set(
+      locales
+        .map((d) => d.prescriptionSourceId)
+        .filter((v): v is string => !!v),
+    );
+
+    return this.promouvoirNouvelles(flatDemandes, sourceIdsConnus);
   }
 
   // ─── Répercussion statut vers prescription_back ───────────────────
@@ -258,37 +275,33 @@ export class DemandesService {
       return { message: 'Rôle non reconnu' };
     }
 
-    const [locales, flatDemandes] = await Promise.all([
+    const [connues, flatDemandes] = await Promise.all([
       this.prisma.eegDemande.findMany({
-        include: { resultat: true, rdv: true },
-        orderBy: { dateCreation: 'desc' },
+        select: { prescriptionSourceId: true },
       }),
       this.prescriptionClient.listEegDemandes(undefined, undefined, token),
     ]);
 
     const sourceIdsConnus = new Set(
-      locales
+      connues
         .map((d) => d.prescriptionSourceId)
         .filter((v): v is string => !!v),
     );
 
-    const virtuelles = flatDemandes
-      .filter((d) => !sourceIdsConnus.has(d.id))
-      .map((d) => this.buildVirtualDemande(d));
+    // Promeut et notifie immédiatement toute nouvelle prescription vue ici,
+    // avec le token de l'utilisateur connecté — sans attendre le prochain
+    // passage du cron (qui, lui, dépend d'un token statique plus fragile).
+    await this.promouvoirNouvelles(flatDemandes, sourceIdsConnus);
 
-    const localesActives = locales.filter(
+    const locales = await this.prisma.eegDemande.findMany({
+      include: { resultat: true, rdv: true },
+      orderBy: { dateCreation: 'desc' },
+    });
+
+    const toutes = locales.filter(
       (d) =>
         !['RESULTAT_DISPONIBLE', 'ANNULEE'].includes(d.statut) &&
         this.aUnPrescripteur(d),
-    );
-
-    const virtuellesAvecPrescripteur = virtuelles.filter((d) =>
-      this.aUnPrescripteur(d),
-    );
-
-    const toutes = [...localesActives, ...virtuellesAvecPrescripteur].sort(
-      (a, b) =>
-        new Date(b.dateCreation).getTime() - new Date(a.dateCreation).getTime(),
     );
 
     const avecPatient = await this.patientLookup.attachPatientInfoToMany(toutes);
