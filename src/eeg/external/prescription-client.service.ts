@@ -89,7 +89,13 @@ function normaliserUrgence(
 ): 'STAT' | 'URGENTE' | 'NORMALE' {
   if (!valeur?.trim()) return 'NORMALE';
   const v = valeur.trim().toUpperCase();
-  if (v === 'STAT') return 'STAT';
+  // prescription_back utilise son propre enum UrgenceNiveau (NORMAL |
+  // URGENT | TRES_URGENT — voir common/enums/urgence.enum.ts côté
+  // prescription_back), distinct du nôtre (NORMALE | URGENTE | STAT).
+  // TRES_URGENT n'était pas reconnu ici : chaque prescription "Très urgent"
+  // retombait silencieusement sur NORMALE (aucun son STAT, aucune alerte
+  // "STAT non réalisé depuis 30 min" ne pouvait jamais se déclencher).
+  if (v === 'STAT' || v === 'TRES_URGENT') return 'STAT';
   if (v === 'URGENTE' || v === 'URGENT') return 'URGENTE';
   if (v === 'NORMALE' || v === 'NORMAL') return 'NORMALE';
   _normLogger.warn(

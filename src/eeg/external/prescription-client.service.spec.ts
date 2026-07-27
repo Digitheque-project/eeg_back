@@ -85,6 +85,23 @@ describe('PrescriptionClientService', () => {
       expect(result).toEqual([]);
     });
 
+    it.each([
+      ['NORMAL', 'NORMALE'],
+      ['URGENT', 'URGENTE'],
+      ['TRES_URGENT', 'STAT'], // enum réel de prescription_back — voir UrgenceNiveau
+      ['inconnu-xyz', 'NORMALE'],
+    ])('should normalize urgence "%s" to "%s"', async (raw, attendu) => {
+      const rawResponse = {
+        data: [{ id: 'rx-urg', patientId: 'PAT-URG', prescripteurId: 'doc-urg', urgence: raw }],
+      };
+
+      jest.spyOn(httpService, 'get').mockReturnValue(of(rawResponse as any));
+
+      const result = await service.listEegDemandes();
+
+      expect(result[0].urgence).toBe(attendu);
+    });
+
     it('should map several prescriptions to several flat demandes, one each', async () => {
       const rawResponse = {
         data: [
