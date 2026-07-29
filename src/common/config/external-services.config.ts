@@ -80,6 +80,12 @@ export const externalServicesConfig = {
   // Hub de notifications partagé
   notificationServiceUrl: readEnv('NOTIFICATION_SERVICE_URL'),
 
+  // Stockage centralisé des fichiers (images de trace EEG)
+  uploadServiceUrl: readEnv('UPLOAD_SERVICE_URL'),
+
+  // Dossier patient partagé (antécédents, diagnostics, examens...)
+  dossierPatientApiUrl: readEnv('DOSSIER_PATIENT_API_URL'),
+
   // Prescripteur de repli quand une prescription externe n'en fournit aucun
   // (id d'un vrai CHEF_SERVICE côté auth-service). Vide tant que les vrais
   // utilisateurs ne sont pas encore créés — voir DemandesService.resolvePrescripteurId.

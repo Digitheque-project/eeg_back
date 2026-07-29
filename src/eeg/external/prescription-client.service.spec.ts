@@ -43,6 +43,11 @@ describe('PrescriptionClientService', () => {
             serviceIdSource: 'srv-001',
             serviceIdDest: 'srv-002',
             createdAt: '2026-07-15T08:00:00Z',
+            aeActuel: 'Valproate 500mg x2/j',
+            agePremiereCrise: '3 ans',
+            dpm: 'Normal',
+            typeCrise: 'Généralisée tonico-clonique',
+            dateDerniereCrise: '2026-07-10',
           },
         ],
       };
@@ -64,6 +69,14 @@ describe('PrescriptionClientService', () => {
         typeEEG: 'EEG',
         urgence: 'URGENTE',
         renseignements: 'Épilepsie réfractaire',
+        // Champs cliniques de la prescription — doivent être propagés
+        // jusqu'au bout (voir demandes.service.ts pour l'usage à
+        // l'interprétation, TabC_CompteRendu côté front).
+        aeActuel: 'Valproate 500mg x2/j',
+        agePremiereCrise: '3 ans',
+        dpm: 'Normal',
+        typeCrise: 'Généralisée tonico-clonique',
+        dateDerniereCrise: '2026-07-10',
       });
     });
 

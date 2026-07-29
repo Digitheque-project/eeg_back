@@ -115,6 +115,11 @@ export class DemandesService {
       dateRealisation: null as Date | null,
       dateValidation: null as Date | null,
       motifAnnulation: null as string | null,
+      aeActuel: p.aeActuel ?? null,
+      agePremiereCrise: p.agePremiereCrise ?? null,
+      dpm: p.dpm ?? null,
+      typeCrise: p.typeCrise ?? null,
+      dateDerniereCrise: p.dateDerniereCrise ?? null,
     };
   }
 
@@ -151,6 +156,20 @@ export class DemandesService {
           numeroEEG: `EEG-${Date.now()}`,
           prescriptionSourceId: p.id,
           prescriptionParentId: p.prescriptionParentId,
+          // Sans ce champ, Prisma retombe sur son défaut (now()) — la date
+          // enregistrée serait alors le moment de la SYNCHRONISATION (le
+          // prochain chargement de la worklist ou passage du cron), pas le
+          // vrai moment de création chez prescription_back. C'est ce qui
+          // rendait les heures d'arrivée affichées fausses.
+          dateCreation: p.createdAt ? new Date(p.createdAt) : new Date(),
+          // Snapshot clinique pris à la prescription — affiché en lecture
+          // seule à l'interprétation au lieu d'être ressaisi (voir
+          // archiverResultat, qui les recopie ensuite dans EegResultat).
+          aeActuel: p.aeActuel ?? null,
+          agePremiereCrise: p.agePremiereCrise ?? null,
+          dpm: p.dpm ?? null,
+          typeCrise: p.typeCrise ?? null,
+          dateDerniereCrise: p.dateDerniereCrise ?? null,
         },
         include: { rdv: true },
       });
@@ -495,13 +514,17 @@ export class DemandesService {
       );
     }
 
+    // CLINIQUE : sourcé depuis la demande (snapshot pris à la prescription
+    // chez prescription_back — voir promoteToLocal), pas depuis le
+    // formulaire. Le CHEF_SERVICE n'a plus à ressaisir des informations
+    // déjà fournies par le prescripteur ; seul `autresRc` reste sa saisie.
     const data = {
-      aeActuel: compteRendu.aeActuel ?? null,
-      age1ereCrise: compteRendu.age1ereCrise ?? null,
-      dpm: compteRendu.dpm ?? null,
-      typeCrises: compteRendu.typeCrises ?? null,
+      aeActuel: d.aeActuel ?? null,
+      age1ereCrise: d.agePremiereCrise ?? null,
+      dpm: d.dpm ?? null,
+      typeCrises: d.typeCrise ?? null,
       autresRc: compteRendu.autresRc ?? null,
-      dateDerniereCrise: compteRendu.dateDerniereCrise ?? null,
+      dateDerniereCrise: d.dateDerniereCrise ?? null,
       activiteDeFond: compteRendu.activiteDeFond ?? null,
       anomaliesAuRepos: compteRendu.anomaliesAuRepos ?? null,
       testActivationHpn: compteRendu.testActivationHpn ?? null,

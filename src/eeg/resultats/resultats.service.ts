@@ -5,18 +5,25 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RectifierResultatDto } from './dto/rectifier-resultat.dto';
+import { UploadClientService } from '../external/upload-client.service';
 import * as path from 'path';
-import * as fs from 'fs';
 
 @Injectable()
 export class ResultatsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly uploadClient: UploadClientService,
+  ) {}
 
   // ─── Upload image tracé (PNG/JPG uniquement) ───────────────────────
+  // Stockée sur le service upload centralisé du CHU (plus de disque local) —
+  // `fichierImagePath` contient désormais le filename renvoyé par ce
+  // service (clé pour le récupérer), pas un chemin disque.
   async uploadImageTrace(
     demandeId: string,
     fichier: Express.Multer.File,
     technicienId: string,
+    token?: string,
   ) {
     if (!fichier) {
       throw new BadRequestException('Fichier image requis');
@@ -46,17 +53,18 @@ export class ResultatsService {
       );
     }
 
-    // Stocker l'image
-    const dossier = path.join('uploads', 'eeg', 'images', demandeId);
-    fs.mkdirSync(dossier, { recursive: true });
-    const cheminFichier = path.join(dossier, `trace${ext}`);
-    fs.writeFileSync(cheminFichier, fichier.buffer);
+    const uploaded = await this.uploadClient.uploadFile(
+      fichier.buffer,
+      fichier.originalname,
+      fichier.mimetype,
+      token,
+    );
 
     if (existant) {
       return this.prisma.eegResultat.update({
         where: { demandeId },
         data: {
-          fichierImagePath: cheminFichier,
+          fichierImagePath: uploaded.filename,
           nomFichierImage: fichier.originalname,
         },
       });
@@ -65,17 +73,18 @@ export class ResultatsService {
     return this.prisma.eegResultat.create({
       data: {
         demandeId,
-        fichierImagePath: cheminFichier,
+        fichierImagePath: uploaded.filename,
         nomFichierImage: fichier.originalname,
         medecinValidateurId: technicienId,
       },
     });
   }
 
-  // ─── Récupération du chemin de l'image tracé (pour affichage) ─────
-  async getCheminImage(
+  // ─── Récupération de l'image tracé (pour affichage) ────────────────
+  async getImageTrace(
     demandeId: string,
-  ): Promise<{ cheminFichier: string; nomFichier: string }> {
+    token?: string,
+  ): Promise<{ data: Buffer; contentType: string; nomFichier: string }> {
     const resultat = await this.prisma.eegResultat.findUnique({
       where: { demandeId },
       select: { fichierImagePath: true, nomFichierImage: true },
@@ -83,10 +92,11 @@ export class ResultatsService {
     if (!resultat?.fichierImagePath) {
       throw new NotFoundException('Aucune image pour cette demande');
     }
-    return {
-      cheminFichier: resultat.fichierImagePath,
-      nomFichier: resultat.nomFichierImage ?? 'trace',
-    };
+    const { data, contentType } = await this.uploadClient.getFile(
+      resultat.fichierImagePath,
+      token,
+    );
+    return { data, contentType, nomFichier: resultat.nomFichierImage ?? 'trace' };
   }
 
   // ─── Rectification d'un résultat immuable ─────────────────────────

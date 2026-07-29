@@ -214,6 +214,88 @@ describe('DemandesService', () => {
         }),
       );
     });
+
+    // Sans ce champ explicite, Prisma retombe sur son défaut (now()) — la
+    // date enregistrée serait le moment de la synchronisation, pas le vrai
+    // moment de création chez prescription_back. C'est ce qui rendait les
+    // heures d'arrivée affichées fausses (voir prescription-client tests
+    // pour le champ `createdAt` amont).
+    it('should persist dateCreation from the source prescription createdAt, not the sync time', async () => {
+      prisma.eegDemande.create.mockResolvedValue({ id: 'local-004' });
+      prisma.eegNotification.create.mockResolvedValue({});
+
+      prescriptionClient.listEegDemandes.mockResolvedValue([
+        {
+          id: 'dem-ext-004',
+          prescriptionParentId: 'rx-ext-004',
+          patientId: 'PAT-004',
+          prescripteurId: 'ext-doc-004',
+          typeEEG: 'EEG',
+          urgence: 'NORMALE',
+          createdAt: '2026-07-26T16:11:55.258Z',
+        },
+      ]);
+
+      await service.syncPendingPrescriptions();
+
+      expect(prisma.eegDemande.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            dateCreation: new Date('2026-07-26T16:11:55.258Z'),
+          }),
+        }),
+      );
+    });
+  });
+
+  // Le CHEF_SERVICE ne doit plus ressaisir les champs CLINIQUE : ils sont
+  // recopiés depuis le snapshot pris à la prescription (EegDemande), pas
+  // depuis le formulaire d'archivage — avec le mapping de noms
+  // agePremiereCrise→age1ereCrise et typeCrise→typeCrises.
+  describe('archiverResultat', () => {
+    const demandeEnCours = {
+      id: 'dem-clin-001',
+      statut: 'EN_COURS',
+      prescriptionParentId: 'rx-clin-001',
+      prescriptionSourceId: 'dem-clin-001',
+      patientId: 'PAT-CLIN-001',
+      aeActuel: 'Valproate 500mg x2/j',
+      agePremiereCrise: '3 ans',
+      dpm: 'Normal',
+      typeCrise: 'Généralisée tonico-clonique',
+      dateDerniereCrise: '2026-07-10',
+    };
+
+    it('should source CLINIQUE fields from the demande snapshot, not from the form', async () => {
+      prisma.eegDemande.findFirst.mockResolvedValue(demandeEnCours);
+      prisma.eegResultat.findUnique.mockResolvedValue(null);
+      prisma.eegResultat.create.mockResolvedValue({});
+      prisma.eegDemande.update.mockResolvedValue({
+        id: 'dem-clin-001',
+        patientId: 'PAT-CLIN-001',
+        numeroEEG: 'EEG-CLIN-001',
+      });
+
+      await service.archiverResultat(
+        'dem-clin-001',
+        { autresRc: 'Antécédent familial', conclusion: 'Tracé normal' } as any,
+        'chef-001',
+      );
+
+      expect(prisma.eegResultat.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            aeActuel: 'Valproate 500mg x2/j',
+            age1ereCrise: '3 ans',
+            dpm: 'Normal',
+            typeCrises: 'Généralisée tonico-clonique',
+            dateDerniereCrise: '2026-07-10',
+            autresRc: 'Antécédent familial',
+            conclusion: 'Tracé normal',
+          }),
+        }),
+      );
+    });
   });
 
   // getWorklist doit désormais promouvoir + notifier immédiatement toute

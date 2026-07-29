@@ -169,6 +169,14 @@ export class RdvsController {
 
   @Patch(':id')
   async modifierRdv(@Param('id') id: string, @Body() body: ModifierRdvDto) {
+    const existant = await this.prisma.eegRdv.findUnique({ where: { id } });
+    if (!existant) throw new NotFoundException(`RDV ${id} introuvable`);
+    if (existant.statut === StatutRdv.REALISE) {
+      throw new BadRequestException(
+        'Ce RDV est déjà réalisé — il ne peut plus être modifié',
+      );
+    }
+
     const data: Partial<ModifierRdvDto & { dateRdv: Date }> = {};
     if (body.dateRdv) {
       const dateRdv = new Date(body.dateRdv);
@@ -274,6 +282,11 @@ export class RdvsController {
       include: { demande: true },
     });
     if (!rdv) throw new NotFoundException(`RDV ${id} introuvable`);
+    if (rdv.statut === StatutRdv.REALISE) {
+      throw new BadRequestException(
+        'Ce RDV est déjà réalisé — il ne peut plus être annulé',
+      );
+    }
 
     return this.prisma.$transaction(async (tx) => {
       // 1. Répercuter sur la demande liée (garde de non-régression) et

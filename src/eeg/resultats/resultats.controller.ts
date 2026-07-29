@@ -13,12 +13,11 @@ import {
 import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
-import * as path from 'path';
-import { createReadStream } from 'fs';
 import { ApiTags, ApiOperation, ApiParam, ApiBody } from '@nestjs/swagger';
 import { ResultatsService } from './resultats.service';
 import { RectifierResultatDto } from './dto/rectifier-resultat.dto';
 import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
+import { BearerToken } from '../../common/decorators/bearer-token.decorator';
 
 @ApiTags('Résultats')
 @Controller('eeg')
@@ -41,12 +40,14 @@ export class ResultatsController {
     @Param('demandeId') demandeId: string,
     @UploadedFile() fichier: Express.Multer.File,
     @Request() req: AuthenticatedRequest,
+    @BearerToken() token?: string,
   ) {
     const technicienId = req.user!.id;
     return this.resultatsService.uploadImageTrace(
       demandeId,
       fichier,
       technicienId,
+      token,
     );
   }
 
@@ -54,6 +55,7 @@ export class ResultatsController {
   // Sert l'image tracé déjà uploadée — utilisé par l'onglet compte rendu
   // (pour que le chef de service voie le tracé qu'il interprète) et par
   // les archives (pour retrouver l'image d'un résultat déjà validé).
+  // Proxy vers le service upload centralisé du CHU (plus de disque local).
   @Get('upload/image/:demandeId')
   @ApiOperation({
     summary: "Récupérer l'image de trace EEG déjà uploadée",
@@ -62,15 +64,15 @@ export class ResultatsController {
   async getImageTrace(
     @Param('demandeId') demandeId: string,
     @Res({ passthrough: true }) res: Response,
+    @BearerToken() token?: string,
   ): Promise<StreamableFile> {
-    const { cheminFichier, nomFichier } =
-      await this.resultatsService.getCheminImage(demandeId);
-    const ext = path.extname(nomFichier).toLowerCase();
+    const { data, contentType, nomFichier } =
+      await this.resultatsService.getImageTrace(demandeId, token);
     res.set({
-      'Content-Type': ext === '.png' ? 'image/png' : 'image/jpeg',
+      'Content-Type': contentType,
       'Content-Disposition': `inline; filename="${nomFichier}"`,
     });
-    return new StreamableFile(createReadStream(path.resolve(cheminFichier)));
+    return new StreamableFile(data);
   }
 
   // RÈGLE MÉTIER — à faire respecter par le RolesGuard en Phase 6

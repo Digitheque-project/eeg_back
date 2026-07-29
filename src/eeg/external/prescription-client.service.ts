@@ -75,6 +75,15 @@ export interface PrescriptionEegDemandeFlat {
   serviceIdSource?: string;
   serviceIdDest?: string;
   createdAt?: string;
+  // ─── Snapshot clinique pris à la prescription ──────────────────────
+  // Affiché en lecture seule à l'interprétation (CHEF_SERVICE) au lieu
+  // d'être ressaisi — voir demandes.service.ts (promoteToLocal,
+  // buildVirtualDemande, archiverResultat).
+  aeActuel?: string;
+  agePremiereCrise?: string;
+  dpm?: string;
+  typeCrise?: string;
+  dateDerniereCrise?: string;
 }
 
 
@@ -125,6 +134,11 @@ function flattenPrescriptions(
     serviceIdSource: rx.serviceIdSource,
     serviceIdDest: rx.serviceIdDest,
     createdAt: rx.createdAt,
+    aeActuel: rx.aeActuel,
+    agePremiereCrise: rx.agePremiereCrise,
+    dpm: rx.dpm,
+    typeCrise: rx.typeCrise,
+    dateDerniereCrise: rx.dateDerniereCrise,
   }));
 }
 

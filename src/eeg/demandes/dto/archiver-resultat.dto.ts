@@ -3,35 +3,19 @@ import { IsBoolean, IsOptional, IsString } from 'class-validator';
 /**
  * DTO pour l'archivage du compte rendu par le chef de service.
  * Interpréter = archiver en une seule action (pas de brouillon séparé).
- * Champs alignés sur le formulaire papier réel du CHU Andrainjato — seule
- * cette section (CLINIQUE, INTERPRETATION, CONCLUSION, CONDUITE A TENIR)
- * est saisie manuellement, le reste du document étant rempli automatiquement.
+ *
+ * La plupart des champs CLINIQUE (AE actuel, âge 1ère crise, DPM, type de
+ * crise(s), date dernière crise) ne sont plus saisis ici : ce sont des
+ * informations déjà fournies à la prescription chez prescription_back,
+ * recopiées automatiquement depuis la demande (voir
+ * DemandesService.archiverResultat). Seul `autresRc` (sans équivalent côté
+ * prescription) reste une saisie du chef de service, avec INTERPRETATION
+ * et CONCLUSION / CONDUITE A TENIR.
  */
 export class ArchiverResultatDto {
-  // CLINIQUE
-  @IsString()
-  @IsOptional()
-  aeActuel?: string;
-
-  @IsString()
-  @IsOptional()
-  age1ereCrise?: string;
-
-  @IsString()
-  @IsOptional()
-  dpm?: string;
-
-  @IsString()
-  @IsOptional()
-  typeCrises?: string;
-
   @IsString()
   @IsOptional()
   autresRc?: string;
-
-  @IsString()
-  @IsOptional()
-  dateDerniereCrise?: string;
 
   // INTERPRETATION
   @IsString()

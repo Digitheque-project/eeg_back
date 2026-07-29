@@ -12,6 +12,8 @@ import { PatientLookupService } from './patient-lookup.service';
 import { AccueilClientService } from './accueil-client.service';
 import { PrescriptionClientService } from '../external/prescription-client.service';
 import { PriseEnChargeClientService } from '../../common/clients/prise-en-charge-client.service';
+import { DossierPatientClientService } from '../external/dossier-patient-client.service';
+import { BearerToken } from '../../common/decorators/bearer-token.decorator';
 
 @Controller('eeg/patients')
 export class PatientsController {
@@ -21,6 +23,7 @@ export class PatientsController {
     private readonly accueilClient: AccueilClientService,
     private readonly prescriptionClient: PrescriptionClientService,
     private readonly priseEnChargeClient: PriseEnChargeClientService,
+    private readonly dossierPatientClient: DossierPatientClientService,
   ) {}
 
   private async toResponse(patient: {
@@ -112,6 +115,25 @@ export class PatientsController {
     ]);
 
     return { ...base, demandes, rdvs };
+  }
+
+  // Résumé ciblé EEG du dossier patient partagé — antécédents, dernière
+  // histoire de la maladie, diagnostics, dernier examen neurologique.
+  // Chaque section peut être `null` (donnée absente ou service en erreur,
+  // voir DossierPatientClientService) : ce n'est jamais une panne de page.
+  @Get(':id/dossier')
+  async getDossierPatient(
+    @Param('id') id: string,
+    @BearerToken() token?: string,
+  ) {
+    const [antecedents, histoireMaladie, diagnostics, examenNeurologique] =
+      await Promise.all([
+        this.dossierPatientClient.getAntecedents(id, token),
+        this.dossierPatientClient.getHistoireMaladie(id, token),
+        this.dossierPatientClient.getDiagnostics(id, token),
+        this.dossierPatientClient.getExamenNeurologique(id, token),
+      ]);
+    return { antecedents, histoireMaladie, diagnostics, examenNeurologique };
   }
 
   @Patch(':id')

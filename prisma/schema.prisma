@@ -101,6 +101,15 @@ model EegDemande {
   dateValidation           DateTime?
   motifAnnulation          String?
 
+  // Snapshot clinique pris à la prescription (chez prescription_back) —
+  // affiché en lecture seule à l'interprétation (CHEF_SERVICE) au lieu
+  // d'être ressaisi : voir TabC_CompteRendu côté eeg_front.
+  aeActuel          String?
+  agePremiereCrise  String?
+  dpm               String?
+  typeCrise         String?
+  dateDerniereCrise String?
+
   resultat      EegResultat?
   notifications EegNotification[]
   audits        EegAudit[]
