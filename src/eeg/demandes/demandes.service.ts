@@ -220,6 +220,9 @@ export class DemandesService {
           message: `${demande.numeroEEG} — ${demande.typeEEG}`,
           patientId: demande.patientId,
           demandeId: demande.id,
+          // Concerne le TECHNICIEN (à lui de planifier/réaliser) — pas le
+          // CHEF_SERVICE, qui n'agit qu'une fois l'examen réalisé.
+          roleCible: 'TECHNICIEN',
         },
       });
     }
@@ -492,6 +495,22 @@ export class DemandesService {
       d.prescriptionSourceId,
       'EN_COURS',
     );
+
+    // Notification interactive du transfert TECHNICIEN -> CHEF_SERVICE :
+    // sans ça, seule l'alerte "non interprété depuis 24h" (cron) existait,
+    // bien trop tardive pour un examen qui vient d'être réalisé.
+    await this.prisma.eegNotification.create({
+      data: {
+        niveau: demandeMaj.urgence,
+        type: 'A_INTERPRETER',
+        titre: 'Examen à interpréter',
+        message: `${demandeMaj.numeroEEG} — examen réalisé, prêt à interpréter`,
+        patientId: demandeMaj.patientId,
+        demandeId: demandeMaj.id,
+        roleCible: 'CHEF_SERVICE',
+      },
+    });
+
     return demandeMaj;
   }
 

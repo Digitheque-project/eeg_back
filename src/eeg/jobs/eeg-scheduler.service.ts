@@ -84,6 +84,7 @@ export class EegSchedulerService implements OnModuleInit {
             message: `${demande.numeroEEG} (${patient.nom}) réalisé depuis >24h sans interprétation.`,
             demandeId: demande.id,
             patientId: demande.patientId,
+            roleCible: 'CHEF_SERVICE',
           },
         });
       }
@@ -117,6 +118,7 @@ export class EegSchedulerService implements OnModuleInit {
             message: `${demande.numeroEEG} (${patient.nom}) STAT en attente depuis >30min.`,
             demandeId: demande.id,
             patientId: demande.patientId,
+            roleCible: 'TECHNICIEN',
           },
         });
       }

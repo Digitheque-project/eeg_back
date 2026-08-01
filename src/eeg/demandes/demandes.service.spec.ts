@@ -246,6 +246,74 @@ describe('DemandesService', () => {
         }),
       );
     });
+
+    // Sans roleCible, un TECHNICIEN et un CHEF_SERVICE voyaient exactement
+    // les mêmes notifications — aucune "logique métier" par rôle.
+    it('should target NOUVELLE_DEMANDE notifications at TECHNICIEN', async () => {
+      prisma.eegDemande.create.mockResolvedValue({
+        id: 'local-005',
+        numeroEEG: 'EEG-005',
+        patientId: 'PAT-005',
+        urgence: 'NORMALE',
+        typeEEG: 'EEG',
+      });
+      prisma.eegNotification.create.mockResolvedValue({});
+
+      prescriptionClient.listEegDemandes.mockResolvedValue([
+        {
+          id: 'dem-ext-005',
+          prescriptionParentId: 'rx-ext-005',
+          patientId: 'PAT-005',
+          prescripteurId: 'ext-doc-005',
+        },
+      ]);
+
+      await service.syncPendingPrescriptions();
+
+      expect(prisma.eegNotification.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            type: 'NOUVELLE_DEMANDE',
+            roleCible: 'TECHNICIEN',
+          }),
+        }),
+      );
+    });
+  });
+
+  // Transfert TECHNICIEN -> CHEF_SERVICE : jusqu'ici aucune notification
+  // n'existait pour ça (seule l'alerte "non interprété depuis 24h", bien
+  // trop tardive). Voir demandes.service.ts:realiserDemande.
+  describe('realiserDemande', () => {
+    it('should create an A_INTERPRETER notification targeted at CHEF_SERVICE', async () => {
+      prisma.eegDemande.findFirst.mockResolvedValue({
+        id: 'dem-500',
+        statut: 'PLANIFIEE',
+        urgence: 'URGENTE',
+        rdv: null,
+        prescriptionParentId: 'rx-500',
+        prescriptionSourceId: 'dem-500',
+      });
+      prisma.eegDemande.update.mockResolvedValue({
+        id: 'dem-500',
+        numeroEEG: 'EEG-500',
+        patientId: 'PAT-500',
+        urgence: 'URGENTE',
+      });
+      prisma.eegNotification.create.mockResolvedValue({});
+
+      await service.realiserDemande('dem-500', 'tech-001');
+
+      expect(prisma.eegNotification.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            type: 'A_INTERPRETER',
+            roleCible: 'CHEF_SERVICE',
+            demandeId: 'dem-500',
+          }),
+        }),
+      );
+    });
   });
 
   // Le CHEF_SERVICE ne doit plus ressaisir les champs CLINIQUE : ils sont

@@ -40,6 +40,7 @@ enum TypeNotification {
   ALERTE_CRITIQUE
   ALERTE_URGENTE
   NOUVELLE_DEMANDE
+  A_INTERPRETER
   RAPPORT
   SYSTEME
 }
@@ -217,6 +218,10 @@ model EegNotification {
   rdvId          String?
   demandeId      String?
   dateLecture    DateTime?
+  // Rôle EEG concerné (TECHNICIEN | CHEF_SERVICE) — null = visible par
+  // tous (compat notifications déjà existantes). MAJOR_SERVICE (rôle de
+  // supervision) voit toujours tout, filtre ignoré pour lui.
+  roleCible      String?
 
   rdv     EegRdv?                 @relation(fields: [rdvId], references: [id])
   demande EegDemande?             @relation(fields: [demandeId], references: [id])

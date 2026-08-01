@@ -1,7 +1,8 @@
-import { Controller, Get, Patch, Param, Query } from '@nestjs/common';
+import { Controller, Get, Patch, Param, Query, Request } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PatientLookupService } from '../patients/patient-lookup.service';
+import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
 
 @Controller('eeg/notifications')
 export class NotificationsController {
@@ -18,11 +19,26 @@ export class NotificationsController {
     return { ...notif, patient };
   }
 
+  // MAJOR_SERVICE est un rôle de supervision/reporting (voit déjà "Tous
+  // les statuts" par défaut dans la worklist) : il voit toutes les
+  // notifications, sans filtre. TECHNICIEN/CHEF_SERVICE ne voient que ce
+  // qui les concerne (roleCible = leur rôle) + les notifications
+  // génériques non ciblées (roleCible NULL, compat anciennes données).
+  private filtreRole(role?: string): Prisma.EegNotificationWhereInput {
+    if (!role || role === 'MAJOR_SERVICE') return {};
+    return { OR: [{ roleCible: null }, { roleCible: role }] };
+  }
+
   // GET /eeg/notifications
   // GET /eeg/notifications?lu=false
   @Get()
-  async getNotifications(@Query('lu') lu?: string) {
-    const where: Prisma.EegNotificationWhereInput = {};
+  async getNotifications(
+    @Request() req: AuthenticatedRequest,
+    @Query('lu') lu?: string,
+  ) {
+    const where: Prisma.EegNotificationWhereInput = {
+      ...this.filtreRole(req.user?.role),
+    };
 
     if (lu !== undefined) {
       where.lu = lu === 'true';
@@ -44,19 +60,23 @@ export class NotificationsController {
 
   // GET /eeg/notifications/count
   @Get('count')
-  async countNonLues() {
-    const total = await this.prisma.eegNotification.count();
+  async countNonLues(@Request() req: AuthenticatedRequest) {
+    const where = this.filtreRole(req.user?.role);
+    const total = await this.prisma.eegNotification.count({ where });
     const nonLues = await this.prisma.eegNotification.count({
-      where: { lu: false },
+      where: { ...where, lu: false },
     });
     return { total, nonLues };
   }
 
   // GET /eeg/notifications/:id
   @Get(':id')
-  async getNotificationById(@Param('id') id: string) {
-    const notification = await this.prisma.eegNotification.findUnique({
-      where: { id },
+  async getNotificationById(
+    @Param('id') id: string,
+    @Request() req: AuthenticatedRequest,
+  ) {
+    const notification = await this.prisma.eegNotification.findFirst({
+      where: { id, ...this.filtreRole(req.user?.role) },
       include: {
         demande: true,
         actions: true,
@@ -80,9 +100,9 @@ export class NotificationsController {
 
   // PATCH /eeg/notifications/lire-tout
   @Patch('lire-tout')
-  async marquerToutesCommeLues() {
+  async marquerToutesCommeLues(@Request() req: AuthenticatedRequest) {
     const result = await this.prisma.eegNotification.updateMany({
-      where: { lu: false },
+      where: { ...this.filtreRole(req.user?.role), lu: false },
       data: {
         lu: true,
         dateLecture: new Date(),
