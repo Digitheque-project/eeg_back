@@ -292,6 +292,62 @@ export class DemandesService {
     return false;
   }
 
+  // ─── Heure d'arrivée = heure exacte de la notification correspondante ──
+  // La worklist affichait dateCreation/dateRealisation/dateValidation —
+  // des dates calculées indépendamment de la notification qui a réellement
+  // alerté l'utilisateur, donc jamais garanties égales (ex: dateCreation
+  // = heure de la prescription d'origine chez prescription_back, alors que
+  // la notification NOUVELLE_DEMANDE n'est créée qu'au moment de la
+  // synchronisation locale, potentiellement bien plus tard). On va donc
+  // chercher l'horodatage réel de la notification associée à l'état actuel
+  // de chaque demande, avec repli sur l'ancien comportement si elle
+  // manque (données antérieures à l'introduction de ce système).
+  private async attachHeureArrivee<
+    T extends {
+      id: string;
+      statut: string;
+      dateCreation: Date;
+      dateRealisation: Date | null;
+      dateValidation: Date | null;
+    },
+  >(demandes: T[]): Promise<(T & { heureArrivee: Date })[]> {
+    if (demandes.length === 0) return [];
+
+    const notifications = await this.prisma.eegNotification.findMany({
+      where: {
+        demandeId: { in: demandes.map((d) => d.id) },
+        type: { in: ['NOUVELLE_DEMANDE', 'A_INTERPRETER'] },
+      },
+      orderBy: { horodatage: 'asc' },
+      select: { demandeId: true, type: true, horodatage: true },
+    });
+
+    // orderBy asc + Map écrase avec la dernière valeur lue : on garde donc
+    // la PREMIÈRE notification de ce type pour cette demande (la plus
+    // proche de l'arrivée réelle), pas une éventuelle répétition tardive.
+    const horodatageParCle = new Map<string, Date>();
+    for (const n of notifications) {
+      const cle = `${n.demandeId}:${n.type}`;
+      if (!horodatageParCle.has(cle)) horodatageParCle.set(cle, n.horodatage);
+    }
+
+    return demandes.map((d) => {
+      let heureArrivee = d.dateCreation;
+      if (d.statut === 'EN_COURS') {
+        heureArrivee =
+          horodatageParCle.get(`${d.id}:A_INTERPRETER`) ??
+          d.dateRealisation ??
+          d.dateCreation;
+      } else if (d.statut === 'RESULTAT_DISPONIBLE') {
+        heureArrivee = d.dateValidation ?? d.dateCreation;
+      } else {
+        heureArrivee =
+          horodatageParCle.get(`${d.id}:NOUVELLE_DEMANDE`) ?? d.dateCreation;
+      }
+      return { ...d, heureArrivee };
+    });
+  }
+
   async getWorklist(role: string, token?: string) {
     if (!['TECHNICIEN', 'CHEF_SERVICE', 'MAJOR_SERVICE'].includes(role)) {
       return { message: 'Rôle non reconnu' };
@@ -326,7 +382,8 @@ export class DemandesService {
         this.aUnPrescripteur(d),
     );
 
-    const avecPatient = await this.patientLookup.attachPatientInfoToMany(toutes);
+    const avecHeure = await this.attachHeureArrivee(toutes);
+    const avecPatient = await this.patientLookup.attachPatientInfoToMany(avecHeure);
     return { toutes: await this.userLookup.attachPrescripteurInfoToMany(avecPatient) };
   }
 
@@ -337,7 +394,8 @@ export class DemandesService {
       include: { resultat: true, rdv: true },
     });
     if (local) {
-      const avecPatient = await this.patientLookup.attachPatientInfo(local);
+      const [avecHeure] = await this.attachHeureArrivee([local]);
+      const avecPatient = await this.patientLookup.attachPatientInfo(avecHeure);
       return this.userLookup.attachPrescripteurInfo(avecPatient);
     }
 

@@ -23,6 +23,7 @@ describe('DemandesService', () => {
     eegNotification: {
       create: jest.fn(),
       findFirst: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
     },
     eegRdv: { create: jest.fn(), findFirst: jest.fn().mockResolvedValue(null) },
     eegResultat: { findUnique: jest.fn().mockResolvedValue(null), create: jest.fn(), update: jest.fn() },
@@ -453,6 +454,67 @@ describe('DemandesService', () => {
         undefined,
         'fresh-user-token',
       );
+    });
+
+    // La colonne "Heure" doit être exactement égale à l'heure d'arrivée de
+    // la notification correspondante, pas une date calculée séparément
+    // (dateCreation/dateRealisation) qui ne coïncide pas forcément avec
+    // elle (ex: dateCreation = heure de la prescription d'origine chez
+    // prescription_back, alors que la notification n'arrive qu'à la sync).
+    it('should set heureArrivee to the exact horodatage of the matching notification', async () => {
+      const dateCreationAncienne = new Date('2026-08-01T08:00:00.000Z');
+      const horodatageNotif = new Date('2026-08-01T10:30:00.000Z');
+
+      prisma.eegDemande.findMany.mockResolvedValue([
+        {
+          id: 'dem-200',
+          numeroEEG: 'EEG-200',
+          patientId: 'PAT-200',
+          prescripteurId: 'doc-1',
+          statut: 'CREEE',
+          urgence: 'NORMALE',
+          dateCreation: dateCreationAncienne,
+          dateRealisation: null,
+          dateValidation: null,
+          resultat: null,
+          rdv: null,
+        },
+      ]);
+      prisma.eegNotification.findMany.mockResolvedValue([
+        { demandeId: 'dem-200', type: 'NOUVELLE_DEMANDE', horodatage: horodatageNotif },
+      ]);
+      prescriptionClient.listEegDemandes.mockResolvedValue([]);
+
+      const result = await service.getWorklist('TECHNICIEN');
+
+      expect(result.toutes![0].heureArrivee).toEqual(horodatageNotif);
+      expect(result.toutes![0].heureArrivee).not.toEqual(dateCreationAncienne);
+    });
+
+    it('should fall back to dateRealisation for EN_COURS when no A_INTERPRETER notification exists yet', async () => {
+      const dateRealisation = new Date('2026-08-01T11:00:00.000Z');
+
+      prisma.eegDemande.findMany.mockResolvedValue([
+        {
+          id: 'dem-201',
+          numeroEEG: 'EEG-201',
+          patientId: 'PAT-201',
+          prescripteurId: 'doc-1',
+          statut: 'EN_COURS',
+          urgence: 'NORMALE',
+          dateCreation: new Date('2026-08-01T08:00:00.000Z'),
+          dateRealisation,
+          dateValidation: null,
+          resultat: null,
+          rdv: null,
+        },
+      ]);
+      prisma.eegNotification.findMany.mockResolvedValue([]);
+      prescriptionClient.listEegDemandes.mockResolvedValue([]);
+
+      const result = await service.getWorklist('CHEF_SERVICE');
+
+      expect(result.toutes![0].heureArrivee).toEqual(dateRealisation);
     });
   });
 });
