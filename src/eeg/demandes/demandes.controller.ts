@@ -13,6 +13,7 @@ import { PlanifierRdvDto } from './dto/planifier-rdv.dto';
 import { ArchiverResultatDto } from './dto/archiver-resultat.dto';
 import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
 import { BearerToken } from '../../common/decorators/bearer-token.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 
 @ApiTags('Demandes')
 @Controller('eeg/demandes')
@@ -43,6 +44,7 @@ export class DemandesController {
     return this.demandesService.getDemandeById(id, token);
   }
 
+  @Roles('TECHNICIEN', 'CHEF_SERVICE')
   @Patch(':id/annuler')
   @ApiOperation({ summary: 'Annuler une demande EEG' })
   annulerDemande(
@@ -53,9 +55,8 @@ export class DemandesController {
     return this.demandesService.annulerDemande(id, motif, token);
   }
 
-  // RÈGLE MÉTIER — à faire respecter par le RolesGuard en Phase 6
-  // Rôle autorisé : TECHNICIEN
-  // Statut requis de la demande avant action : CREEE
+  // Statut requis de la demande avant action : CREEE (vérifié dans le service)
+  @Roles('TECHNICIEN')
   @Patch(':id/refuser')
   @ApiOperation({
     summary:
@@ -71,9 +72,8 @@ export class DemandesController {
     return this.demandesService.refuserDemande(id, motif, technicienId, token);
   }
 
-  // RÈGLE MÉTIER — à faire respecter par le RolesGuard en Phase 6
-  // Rôle autorisé : TECHNICIEN
-  // Statut requis de la demande avant action : CREEE
+  // Statut requis de la demande avant action : CREEE (vérifié dans le service)
+  @Roles('TECHNICIEN')
   @Patch(':id/planifier')
   @ApiOperation({
     summary: 'TECHNICIEN : Planifier un RDV (CREEE → PLANIFIEE)',
@@ -88,10 +88,11 @@ export class DemandesController {
     return this.demandesService.planifierRdv(id, dto, technicienId, token);
   }
 
-  // RÈGLE MÉTIER — à faire respecter par le RolesGuard en Phase 6
-  // Rôle autorisé : TECHNICIEN
-  // Statut requis de la demande avant action : CREEE avec urgence STAT (prise en charge immédiate)
-  //   ou PLANIFIEE (examen planifié)
+  // Statut requis : CREEE avec urgence STAT (prise en charge immédiate) ou
+  // PLANIFIEE (examen planifié) — vérifié dans le service. CHEF_SERVICE est
+  // volontairement inclus : il doit pouvoir réaliser un examen lui-même
+  // dans les cas exceptionnels (absence du technicien, urgence).
+  @Roles('TECHNICIEN', 'CHEF_SERVICE')
   @Patch(':id/realiser')
   @ApiOperation({
     summary:
@@ -106,9 +107,8 @@ export class DemandesController {
     return this.demandesService.realiserDemande(id, technicienId, token);
   }
 
-  // RÈGLE MÉTIER — à faire respecter par le RolesGuard en Phase 6
-  // Rôle autorisé : CHEF_SERVICE
-  // Statut requis de la demande avant action : EN_COURS
+  // Statut requis de la demande avant action : EN_COURS (vérifié dans le service)
+  @Roles('CHEF_SERVICE')
   @Patch(':id/archiver')
   @ApiOperation({
     summary:

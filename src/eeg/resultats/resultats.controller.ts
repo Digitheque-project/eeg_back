@@ -18,6 +18,7 @@ import { ResultatsService } from './resultats.service';
 import { RectifierResultatDto } from './dto/rectifier-resultat.dto';
 import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
 import { BearerToken } from '../../common/decorators/bearer-token.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 
 @ApiTags('Résultats')
 @Controller('eeg')
@@ -30,6 +31,9 @@ export class ResultatsController {
     summary: 'TECHNICIEN : Uploader une image de trace EEG (PNG/JPG)',
   })
   @ApiParam({ name: 'demandeId', description: 'ID de la demande EEG' })
+  // CHEF_SERVICE inclus pour les mêmes cas exceptionnels que "réaliser"
+  // (voir demandes.controller.ts) : upload et réalisation vont ensemble.
+  @Roles('TECHNICIEN', 'CHEF_SERVICE')
   @UseInterceptors(
     FileInterceptor('fichier', {
       storage: memoryStorage(),
@@ -75,10 +79,9 @@ export class ResultatsController {
     return new StreamableFile(data);
   }
 
-  // RÈGLE MÉTIER — à faire respecter par le RolesGuard en Phase 6
-  // Rôle autorisé : CHEF_SERVICE
-  // Prérequis : EegResultat.estImmutable === true
+  // Prérequis : EegResultat.estImmutable === true (vérifié dans le service)
   // POST /eeg/resultats/:id/rectifier
+  @Roles('CHEF_SERVICE')
   @Post('resultats/:id/rectifier')
   @ApiOperation({
     summary:

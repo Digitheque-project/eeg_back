@@ -25,7 +25,11 @@ describe('DemandesService', () => {
       findFirst: jest.fn().mockResolvedValue(null),
       findMany: jest.fn().mockResolvedValue([]),
     },
-    eegRdv: { create: jest.fn(), findFirst: jest.fn().mockResolvedValue(null) },
+    eegRdv: {
+      create: jest.fn(),
+      findFirst: jest.fn().mockResolvedValue(null),
+      update: jest.fn(),
+    },
     eegResultat: { findUnique: jest.fn().mockResolvedValue(null), create: jest.fn(), update: jest.fn() },
     $transaction: jest.fn().mockImplementation((fns: any) => {
       if (typeof fns === 'function') return fns(mockPrisma);
@@ -314,6 +318,62 @@ describe('DemandesService', () => {
           }),
         }),
       );
+    });
+
+    // EegRdv restait bloqué à EN_ATTENTE indéfiniment tant que la demande
+    // liée était réalisée : seul PATCH .../rdvs/:id/realiser le faisait
+    // passer à REALISE, mais aucune action du front ne l'appelait jamais.
+    it('should also flip the linked EegRdv to REALISE, in the same transaction', async () => {
+      prisma.eegDemande.findFirst.mockResolvedValue({
+        id: 'dem-501',
+        statut: 'PLANIFIEE',
+        urgence: 'NORMALE',
+        rdv: { id: 'rdv-501', statut: 'EN_ATTENTE' },
+        prescriptionParentId: 'rx-501',
+        prescriptionSourceId: 'dem-501',
+      });
+      prisma.eegDemande.update.mockResolvedValue({
+        id: 'dem-501',
+        numeroEEG: 'EEG-501',
+        patientId: 'PAT-501',
+        urgence: 'NORMALE',
+      });
+      prisma.eegRdv.update.mockResolvedValue({ id: 'rdv-501', statut: 'REALISE' });
+      prisma.eegNotification.create.mockResolvedValue({});
+
+      await service.realiserDemande('dem-501', 'tech-001');
+
+      expect(prisma.eegRdv.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'rdv-501' },
+          data: expect.objectContaining({
+            statut: 'REALISE',
+            technicienRealisateurId: 'tech-001',
+          }),
+        }),
+      );
+    });
+
+    it('should not touch EegRdv when the demande has none', async () => {
+      prisma.eegDemande.findFirst.mockResolvedValue({
+        id: 'dem-502',
+        statut: 'PLANIFIEE',
+        urgence: 'NORMALE',
+        rdv: null,
+        prescriptionParentId: 'rx-502',
+        prescriptionSourceId: 'dem-502',
+      });
+      prisma.eegDemande.update.mockResolvedValue({
+        id: 'dem-502',
+        numeroEEG: 'EEG-502',
+        patientId: 'PAT-502',
+        urgence: 'NORMALE',
+      });
+      prisma.eegNotification.create.mockResolvedValue({});
+
+      await service.realiserDemande('dem-502', 'tech-001');
+
+      expect(prisma.eegRdv.update).not.toHaveBeenCalled();
     });
   });
 

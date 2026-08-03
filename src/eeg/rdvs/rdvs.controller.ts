@@ -19,6 +19,7 @@ import { estWeekend, ajouterMinutes } from '../../common/utils/date.util';
 import { CreateRdvDto } from './dto/create-rdv.dto';
 import { ModifierRdvDto } from './dto/modifier-rdv.dto';
 import { RealiserRdvDto } from './dto/realiser-rdv.dto';
+import { Roles } from '../../common/decorators/roles.decorator';
 
 @Controller('eeg/rdvs')
 export class RdvsController {
@@ -141,6 +142,10 @@ export class RdvsController {
     return this.userLookup.attachPrescripteurInfo(avecPatient);
   }
 
+  // Fait doublon avec demandes.controller.ts:planifierRdv (le vrai flux de
+  // planification côté worklist) — pas de conflit de créneau vérifié ici,
+  // contrairement à ce dernier. Gardé pour compat API, sans UI dédiée.
+  @Roles('TECHNICIEN', 'CHEF_SERVICE')
   @Post()
   async creerRdv(@Body() body: CreateRdvDto) {
     const dateRdv = new Date(body.dateRdv);
@@ -167,6 +172,7 @@ export class RdvsController {
     return this.userLookup.attachPrescripteurInfo(avecPatient);
   }
 
+  @Roles('TECHNICIEN', 'CHEF_SERVICE')
   @Patch(':id')
   async modifierRdv(@Param('id') id: string, @Body() body: ModifierRdvDto) {
     const existant = await this.prisma.eegRdv.findUnique({ where: { id } });
@@ -209,6 +215,7 @@ export class RdvsController {
     return this.userLookup.attachPrescripteurInfo(avecPatient);
   }
 
+  @Roles('TECHNICIEN', 'CHEF_SERVICE')
   @Patch(':id/realiser')
   async realiserRdv(@Param('id') id: string, @Body() body: RealiserRdvDto) {
     return this.prisma.eegRdv.update({
@@ -221,6 +228,7 @@ export class RdvsController {
     });
   }
 
+  @Roles('TECHNICIEN', 'CHEF_SERVICE')
   @Patch(':id/non-realise')
   async marquerNonRealise(@Param('id') id: string) {
     // Charger le RDV avec sa demande liée pour déterminer si une répercussion est nécessaire
@@ -274,6 +282,7 @@ export class RdvsController {
     });
   }
 
+  @Roles('TECHNICIEN', 'CHEF_SERVICE')
   @Patch(':id/annuler')
   async annulerRdv(@Param('id') id: string) {
     // Charger le RDV avec sa demande liée pour déterminer si une répercussion est nécessaire
@@ -332,6 +341,10 @@ export class RdvsController {
     });
   }
 
+  // Suppression définitive (pas de soft-delete, pas d'audit trail) — le
+  // rôle le plus restreint volontairement, cette opération est rarement
+  // celle qu'on veut (préférer "annuler").
+  @Roles('CHEF_SERVICE')
   @Delete(':id')
   async supprimerRdv(@Param('id') id: string) {
     await this.prisma.eegRdv.delete({ where: { id } });

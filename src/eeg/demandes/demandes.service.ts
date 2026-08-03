@@ -540,14 +540,33 @@ export class DemandesService {
       }
     }
 
-    const demandeMaj = await this.prisma.eegDemande.update({
-      where: { id: d.id },
-      data: {
-        statut: 'EN_COURS',
-        dateRealisation: new Date(),
-        technicienId: techId,
-      },
-    });
+    const maintenant = new Date();
+    // Le RDV lié (s'il existe) doit passer à REALISE en même temps que la
+    // demande — sans ça, EegRdv restait bloqué à EN_ATTENTE indéfiniment :
+    // le seul endpoint qui le faisait passer à REALISE (PATCH .../realiser)
+    // n'était appelé par aucune action du front.
+    const [demandeMaj] = await this.prisma.$transaction([
+      this.prisma.eegDemande.update({
+        where: { id: d.id },
+        data: {
+          statut: 'EN_COURS',
+          dateRealisation: maintenant,
+          technicienId: techId,
+        },
+      }),
+      ...(d.rdv
+        ? [
+            this.prisma.eegRdv.update({
+              where: { id: d.rdv.id },
+              data: {
+                statut: 'REALISE',
+                dateRealisation: maintenant,
+                technicienRealisateurId: techId,
+              },
+            }),
+          ]
+        : []),
+    ]);
     this.syncStatutToSource(
       d.prescriptionParentId,
       d.prescriptionSourceId,
