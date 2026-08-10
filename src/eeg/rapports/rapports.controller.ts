@@ -67,35 +67,32 @@ export class RapportsController {
     @Query('statut') statut?: StatutFilter,
   ) {
     const base = this.buildBaseWhere(dateDebut, dateFin, urgence);
-
-    if (statut) {
-      return {
-        recues: await this.prisma.eegDemande.count({ where: { ...base, statut } }),
-        traitees: await this.prisma.eegDemande.count({ where: { ...base, statut: 'RESULTAT_DISPONIBLE', ...(statut === 'RESULTAT_DISPONIBLE' ? {} : {}) } }),
-        acceptees: await this.prisma.eegDemande.count({ where: { ...base, statut: { in: ['PLANIFIEE', 'EN_COURS', 'RESULTAT_DISPONIBLE'] } } }),
-        annulees: await this.prisma.eegDemande.count({ where: { ...base, statut: 'ANNULEE' } }),
-        enAttente: await this.prisma.eegDemande.count({ where: { ...base, statut: { in: ['CREEE', 'PLANIFIEE', 'EN_COURS'] } } }),
-      };
-    }
+    // Le filtre `statut` restreint TOUS les compteurs (pas seulement
+    // `recues`) : chaque catégorie est comptée parmi les demandes
+    // correspondant au statut filtré.
+    const scope: Prisma.EegDemandeWhereInput = {
+      ...base,
+      ...(statut ? { statut } : {}),
+    };
 
     const [recues, traitees, acceptees, annulees, enAttente] =
       await Promise.all([
-        this.prisma.eegDemande.count({ where: base }),
+        this.prisma.eegDemande.count({ where: scope }),
         this.prisma.eegDemande.count({
-          where: { ...base, statut: 'RESULTAT_DISPONIBLE' },
+          where: { ...scope, statut: 'RESULTAT_DISPONIBLE' },
         }),
         this.prisma.eegDemande.count({
           where: {
-            ...base,
+            ...scope,
             statut: { in: ['PLANIFIEE', 'EN_COURS', 'RESULTAT_DISPONIBLE'] },
           },
         }),
         this.prisma.eegDemande.count({
-          where: { ...base, statut: 'ANNULEE' },
+          where: { ...scope, statut: 'ANNULEE' },
         }),
         this.prisma.eegDemande.count({
           where: {
-            ...base,
+            ...scope,
             statut: { in: ['CREEE', 'PLANIFIEE', 'EN_COURS'] },
           },
         }),

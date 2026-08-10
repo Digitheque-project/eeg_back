@@ -255,12 +255,42 @@ export class DemandesService {
     motif?: string,
   ) {
     if (!prescriptionParentId || !demandeSourceId) return;
-    void this.prescriptionClient.updateDemandeStatut(
-      prescriptionParentId,
-      demandeSourceId,
-      statut,
-      motif,
-    );
+    this.prescriptionClient
+      .updateDemandeStatut(prescriptionParentId, demandeSourceId, statut, motif)
+      .catch((err: unknown) =>
+        this.logger.error(
+          `Échec répercussion statut ${statut} vers prescription ${demandeSourceId}: ${getErrorMessage(err)}`,
+        ),
+      );
+  }
+
+  // ─── Annulation demande + RDV lié en une transaction ──────────────
+  // Sans ça, le RDV EN_ATTENTE restait accroché à une demande ANNULEE :
+  // toujours affiché dans le planning, occupant le créneau et ne pouvant
+  // plus être réalisé ni replanifié (contrainte unique EegRdv.demandeId).
+  private async annulerAvecRdv(
+    id: string,
+    motif: string,
+    technicienId?: string,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const demande = await tx.eegDemande.update({
+        where: { id },
+        data: {
+          statut: 'ANNULEE',
+          motifAnnulation: motif,
+          ...(technicienId ? { technicienId } : {}),
+        },
+        include: { rdv: true },
+      });
+      if (demande.rdv) {
+        await tx.eegRdv.update({
+          where: { id: demande.rdv.id },
+          data: { statut: 'ANNULE' },
+        });
+      }
+      return demande;
+    });
   }
 
   // ─── Résolution ID → demande locale ou promotion ──────────────────
@@ -428,10 +458,7 @@ export class DemandesService {
     const d = await this.resolveOrPromote(id, token);
     if (d.statut !== 'CREEE')
       throw new BadRequestException(`Statut invalide: ${d.statut}`);
-    const demandeMaj = await this.prisma.eegDemande.update({
-      where: { id: d.id },
-      data: { statut: 'ANNULEE', motifAnnulation: motif, technicienId },
-    });
+    const demandeMaj = await this.annulerAvecRdv(d.id, motif, technicienId);
     this.syncStatutToSource(
       d.prescriptionParentId,
       d.prescriptionSourceId,
@@ -449,10 +476,7 @@ export class DemandesService {
         `Impossible d'annuler une demande ${d.statut}`,
       );
     }
-    const demandeMaj = await this.prisma.eegDemande.update({
-      where: { id: d.id },
-      data: { statut: 'ANNULEE', motifAnnulation: motif },
-    });
+    const demandeMaj = await this.annulerAvecRdv(d.id, motif);
     this.syncStatutToSource(
       d.prescriptionParentId,
       d.prescriptionSourceId,
@@ -478,17 +502,26 @@ export class DemandesService {
         'Impossible de planifier un RDV le week-end',
       );
     }
-    const conflit = await this.prisma.eegRdv.findFirst({
-      where: {
-        dateRdv,
-        heureDebut: dto.heureDebut,
-        statut: { notIn: ['ANNULE', 'NON_REALISE'] },
-      },
-    });
-    if (conflit) throw new BadRequestException('Créneau déjà occupé');
-
     const dureeMinutes = dto.dureeMinutes ?? 60;
     const heureFin = ajouterMinutes(dto.heureDebut, dureeMinutes);
+
+    // Conflit = chevauchement de créneau (heureDebut < heureFin existant et
+    // heureFin > heureDebut existant), pas une simple égalité de l'heure de
+    // début : deux RDV à 08:00 et 08:30 (60 min chacun) se chevauchent.
+    const rdvsMemeJour = await this.prisma.eegRdv.findMany({
+      where: {
+        dateRdv,
+        statut: { notIn: ['ANNULE', 'NON_REALISE'] },
+      },
+      select: { heureDebut: true, heureFin: true, dureeMinutes: true },
+    });
+    const conflit = rdvsMemeJour.find(
+      (rdv) =>
+        dto.heureDebut <
+          (rdv.heureFin ?? ajouterMinutes(rdv.heureDebut, rdv.dureeMinutes ?? 60)) &&
+        heureFin > rdv.heureDebut,
+    );
+    if (conflit) throw new BadRequestException('Créneau déjà occupé');
 
     // EegRdv.prescripteurId est nullable — si la demande n'a pas de
     // prescripteur, on utilise le CHEF_SERVICE par défaut (configuré).
@@ -596,12 +629,16 @@ export class DemandesService {
     compteRendu: ArchiverResultatDto,
     chefId: string,
   ) {
-    const d = await this.getDemandeById(id);
+    // resolveOrPromote (plutôt que getDemandeById) garantit une demande
+    // réellement persistée : l'archivage écrit un EegResultat rattaché à
+    // l'id local (demandeId = FK EegDemande.id), pas à un id source externe.
+    const d = await this.resolveOrPromote(id);
     if (d.statut !== 'EN_COURS')
       throw new BadRequestException(`Statut invalide: ${d.statut}`);
+    const localId = d.id;
 
     const existant = await this.prisma.eegResultat.findUnique({
-      where: { demandeId: id },
+      where: { demandeId: localId },
     });
 
     if (existant?.estImmutable) {
@@ -633,15 +670,20 @@ export class DemandesService {
     };
 
     if (existant) {
-      await this.prisma.eegResultat.update({ where: { demandeId: id }, data });
+      // medecinValidateurId mis à jour aussi en cas de ré-archivage : sinon
+      // il restait celui du technicien qui a uploadé l'image.
+      await this.prisma.eegResultat.update({
+        where: { demandeId: localId },
+        data: { ...data, medecinValidateurId: chefId },
+      });
     } else {
       await this.prisma.eegResultat.create({
-        data: { demandeId: id, ...data, medecinValidateurId: chefId },
+        data: { demandeId: localId, ...data, medecinValidateurId: chefId },
       });
     }
 
     const demandeMaj = await this.prisma.eegDemande.update({
-      where: { id },
+      where: { id: localId },
       data: { statut: 'RESULTAT_DISPONIBLE', dateValidation: new Date() },
     });
     this.syncStatutToSource(

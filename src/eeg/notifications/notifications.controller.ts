@@ -88,7 +88,17 @@ export class NotificationsController {
 
   // PATCH /eeg/notifications/:id/lu
   @Patch(':id/lu')
-  async marquerCommeLue(@Param('id') id: string) {
+  async marquerCommeLue(
+    @Param('id') id: string,
+    @Request() req: AuthenticatedRequest,
+  ) {
+    // Filtre par rôle : on ne peut marquer comme lue qu'une notification
+    // qui nous concerne (sinon n'importe quel utilisateur pouvait marquer
+    // lue une notification d'un autre rôle en connaissant son id).
+    const notification = await this.prisma.eegNotification.findFirst({
+      where: { id, ...this.filtreRole(req.user?.role) },
+    });
+    if (!notification) return null;
     return this.prisma.eegNotification.update({
       where: { id },
       data: {

@@ -42,6 +42,31 @@ export class RdvsController {
     private readonly userLookup: UserLookupService,
   ) {}
 
+  // Contrôle de chevauchement de créneau (pas simple égalité de l'heure de
+  // début) : deux RDV qui se chevauchent ne doivent pas coexister.
+  private async trouverConflitRdv(
+    dateRdv: Date,
+    heureDebut: string,
+    dureeMinutes: number,
+    exclureRdvId?: string,
+  ) {
+    const rdvs = await this.prisma.eegRdv.findMany({
+      where: {
+        dateRdv,
+        statut: { notIn: ['ANNULE', 'NON_REALISE'] },
+        ...(exclureRdvId ? { id: { not: exclureRdvId } } : {}),
+      },
+      select: { heureDebut: true, heureFin: true, dureeMinutes: true },
+    });
+    const heureFin = ajouterMinutes(heureDebut, dureeMinutes);
+    return rdvs.find(
+      (r) =>
+        heureDebut <
+          (r.heureFin ?? ajouterMinutes(r.heureDebut, r.dureeMinutes ?? 60)) &&
+        heureFin > r.heureDebut,
+    );
+  }
+
   @Get()
   async getRdvs(
     @Query('statut') statut?: string,
@@ -154,6 +179,13 @@ export class RdvsController {
         'Impossible de planifier un RDV le week-end',
       );
     }
+    const dureeMinutes = body.dureeMinutes ?? 60;
+    const conflit = await this.trouverConflitRdv(
+      dateRdv,
+      body.heureDebut,
+      dureeMinutes,
+    );
+    if (conflit) throw new BadRequestException('Créneau déjà occupé');
     const rdv = await this.prisma.eegRdv.create({
       data: {
         patientId: body.patientId,
@@ -163,8 +195,8 @@ export class RdvsController {
         priorite: body.priorite,
         dateRdv,
         heureDebut: body.heureDebut,
-        heureFin: body.heureFin,
-        dureeMinutes: body.dureeMinutes,
+        heureFin: body.heureFin ?? ajouterMinutes(body.heureDebut, dureeMinutes),
+        dureeMinutes,
         renseignementClinique: body.renseignementClinique ?? null,
       },
     });
@@ -206,6 +238,23 @@ export class RdvsController {
     if (body.statut) data.statut = body.statut;
     if (body.renseignementClinique !== undefined)
       data.renseignementClinique = body.renseignementClinique;
+
+    // Vérifier le chevauchement dès que date/heure/durée changent (le RDV
+    // modifié lui-même est exclu du contrôle).
+    if (body.dateRdv || body.heureDebut || body.dureeMinutes) {
+      const nouvelleDate = data.dateRdv ?? existant.dateRdv;
+      const nouvelleHeure = (data.heureDebut as string) ?? existant.heureDebut;
+      const nouvelleDuree =
+        (data.dureeMinutes as number) ?? existant.dureeMinutes;
+      const conflit = await this.trouverConflitRdv(
+        nouvelleDate,
+        nouvelleHeure,
+        nouvelleDuree,
+        id,
+      );
+      if (conflit) throw new BadRequestException('Créneau déjà occupé');
+    }
+
     const rdv = await this.prisma.eegRdv.update({
       where: { id },
       data,

@@ -42,7 +42,7 @@ export class EegSchedulerService implements OnModuleInit {
   // technicien n'existe qu'en mémoire côté service Prescription : elle est
   // invisible aux rapports (rapports.controller.ts) et à l'alerte STAT
   // ci-dessous, qui ne portent que sur la table locale.
-  @Cron('*/5 * * * * *')
+  @Cron('*/30 * * * * *')
   async synchroniserPrescriptions() {
     if (this.isSyncingPrescriptions) return;
     this.isSyncingPrescriptions = true;
@@ -69,8 +69,10 @@ export class EegSchedulerService implements OnModuleInit {
       },
     });
     for (const demande of nonInterpretes) {
+      // Déduplication sur l'existence de l'alerte (et non `lu: false`) :
+      // sinon une alerte déjà lue était recréée à chaque passage du cron.
       const dejaNotifie = await this.prisma.eegNotification.findFirst({
-        where: { demandeId: demande.id, type: 'ALERTE_URGENTE', lu: false },
+        where: { demandeId: demande.id, type: 'ALERTE_URGENTE' },
       });
       if (!dejaNotifie) {
         const patient = await this.patientLookup.getPatientInfo(
@@ -103,8 +105,10 @@ export class EegSchedulerService implements OnModuleInit {
       },
     });
     for (const demande of statEnAttente) {
+      // Déduplication sur l'existence de l'alerte (et non `lu: false`) :
+      // sinon une alerte déjà lue était recréée à chaque passage (5 min).
       const dejaNotifie = await this.prisma.eegNotification.findFirst({
-        where: { demandeId: demande.id, type: 'ALERTE_CRITIQUE', lu: false },
+        where: { demandeId: demande.id, type: 'ALERTE_CRITIQUE' },
       });
       if (!dejaNotifie) {
         const patient = await this.patientLookup.getPatientInfo(

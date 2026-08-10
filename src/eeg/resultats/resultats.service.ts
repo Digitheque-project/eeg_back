@@ -43,6 +43,14 @@ export class ResultatsService {
     if (!demande)
       throw new NotFoundException(`Demande ${demandeId} introuvable`);
 
+    // Une image ne doit pas être rattachée à une demande annulée (le
+    // résultat deviendrait un orphelin dans les archives).
+    if (demande.statut === 'ANNULEE') {
+      throw new BadRequestException(
+        'Impossible d’uploader une image : la demande est annulée',
+      );
+    }
+
     // Contrôle d'immutabilité : bloquer l'upload si le résultat est déjà figé
     const existant = await this.prisma.eegResultat.findUnique({
       where: { demandeId },
