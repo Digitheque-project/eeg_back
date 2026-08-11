@@ -255,13 +255,18 @@ export class DemandesService {
     motif?: string,
   ) {
     if (!prescriptionParentId || !demandeSourceId) return;
-    this.prescriptionClient
-      .updateDemandeStatut(prescriptionParentId, demandeSourceId, statut, motif)
-      .catch((err: unknown) =>
-        this.logger.error(
-          `Échec répercussion statut ${statut} vers prescription ${demandeSourceId}: ${getErrorMessage(err)}`,
-        ),
-      );
+    Promise.resolve(
+      this.prescriptionClient.updateDemandeStatut(
+        prescriptionParentId,
+        demandeSourceId,
+        statut,
+        motif,
+      ),
+    ).catch((err: unknown) =>
+      this.logger.error(
+        `Échec répercussion statut ${statut} vers prescription ${demandeSourceId}: ${getErrorMessage(err)}`,
+      ),
+    );
   }
 
   // ─── Annulation demande + RDV lié en une transaction ──────────────
