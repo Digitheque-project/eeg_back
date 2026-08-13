@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { getErrorMessage } from '../../common/utils/error.util';
+import { withBasePath } from '../../common/utils/url.util';
 import { externalServicesConfig } from '../../common/config/external-services.config';
 
 // ─── Shape réelle retournée par GET /prescriptions/eeg ──────────────
@@ -86,7 +87,6 @@ export interface PrescriptionEegDemandeFlat {
   dateDerniereCrise?: string;
 }
 
-
 // ─── Normalisation du champ urgence ──────────────────────────────────
 // prescription_back peut envoyer des variantes non conformes à l'enum
 // Prisma NiveauUrgence (STAT | URGENTE | NORMALE). On centralise ici
@@ -151,7 +151,10 @@ export class PrescriptionClientService {
   private readonly token: string;
 
   constructor(private readonly httpService: HttpService) {
-    this.baseUrl = externalServicesConfig.prescriptionApiUrl;
+    this.baseUrl = withBasePath(
+      externalServicesConfig.prescriptionApiUrl,
+      '/prescriptions',
+    );
     this.chuId = externalServicesConfig.chuId;
     this.serviceId = externalServicesConfig.eegServiceId;
     this.token = externalServicesConfig.prescriptionApiToken;
@@ -173,17 +176,14 @@ export class PrescriptionClientService {
   ): Promise<PrescriptionEegDemandeFlat[]> {
     try {
       const response = await firstValueFrom(
-        this.httpService.get<PrescriptionEegRawDto[]>(
-          `${this.baseUrl}/eeg`,
-          {
-            params: { serviceIdDest, chuId },
-            timeout: 20000,
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${overrideToken ?? this.token}`,
-            },
+        this.httpService.get<PrescriptionEegRawDto[]>(`${this.baseUrl}/eeg`, {
+          params: { serviceIdDest, chuId },
+          timeout: 20000,
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${overrideToken ?? this.token}`,
           },
-        ),
+        }),
       );
 
       this.logger.log(
@@ -192,7 +192,8 @@ export class PrescriptionClientService {
       );
       return flattenPrescriptions(response.data ?? []);
     } catch (error) {
-      const status = (error as { response?: { status?: number } }).response?.status;
+      const status = (error as { response?: { status?: number } }).response
+        ?.status;
       if (status === 401 || status === 403) {
         this.logger.warn(
           `prescription_back a rejeté la requête GET /eeg (${status}) — vérifier PRESCRIPTION_API_TOKEN (expiré ou permissions insuffisantes)`,
@@ -250,7 +251,8 @@ export class PrescriptionClientService {
         ),
       );
     } catch (error) {
-      const status = (error as { response?: { status?: number } }).response?.status;
+      const status = (error as { response?: { status?: number } }).response
+        ?.status;
       if (status === 401 || status === 403) {
         this.logger.warn(
           `prescription_back a rejeté la requête PUT statut ${statut} (${status}) — vérifier PRESCRIPTION_API_TOKEN (expiré ou permissions insuffisantes)`,

@@ -3,6 +3,7 @@ import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import axios from 'axios';
 import { getErrorMessage } from '../../common/utils/error.util';
+import { withBasePath } from '../../common/utils/url.util';
 import { externalServicesConfig } from '../../common/config/external-services.config';
 
 export interface AccueilPatientDto {
@@ -38,7 +39,10 @@ export class AccueilClientService {
   private readonly chuId: string;
 
   constructor(private readonly httpService: HttpService) {
-    this.baseUrl = externalServicesConfig.accueilApiUrl;
+    this.baseUrl = withBasePath(
+      externalServicesConfig.accueilApiUrl,
+      '/accueil',
+    );
     this.chuId = externalServicesConfig.chuId;
   }
 

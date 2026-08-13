@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { getErrorMessage } from '../../common/utils/error.util';
+import { withBasePath } from '../../common/utils/url.util';
 import { externalServicesConfig } from '../../common/config/external-services.config';
 
 /**
@@ -24,7 +25,10 @@ export class DossierPatientClientService {
   private readonly serviceId: string;
 
   constructor(private readonly httpService: HttpService) {
-    this.baseUrl = externalServicesConfig.dossierPatientApiUrl;
+    this.baseUrl = withBasePath(
+      externalServicesConfig.dossierPatientApiUrl,
+      '/dossier-patient',
+    );
     this.chuId = externalServicesConfig.chuId;
     this.serviceId = externalServicesConfig.eegServiceId;
   }
