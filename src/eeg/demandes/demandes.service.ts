@@ -430,7 +430,7 @@ export class DemandesService {
     this.syncStatutToSource(
       d.prescriptionParentId,
       d.prescriptionSourceId,
-      'ANNULEE',
+      'REFUSEE',
       motif,
     );
     return demandeMaj;
