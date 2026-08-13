@@ -220,15 +220,15 @@ describe('DemandesService', () => {
       );
     });
 
-    // Sans ce champ explicite, Prisma retombe sur son défaut (now()) — la
-    // date enregistrée serait le moment de la synchronisation, pas le vrai
-    // moment de création chez prescription_back. C'est ce qui rendait les
-    // heures d'arrivée affichées fausses (voir prescription-client tests
-    // pour le champ `createdAt` amont).
-    it('should persist dateCreation from the source prescription createdAt, not the sync time', async () => {
+    // L'heure d'arrivée est le moment de la synchronisation locale (la
+    // prescription entre dans le module EEG), pas l'heure de création chez
+    // prescription_back — son fuseau est peu fiable. dateCreation est donc
+    // défini à new Date() au moment de la sync (voir promoteToLocal).
+    it('should persist dateCreation as the local sync time, not the source prescription createdAt', async () => {
       prisma.eegDemande.create.mockResolvedValue({ id: 'local-004' });
       prisma.eegNotification.create.mockResolvedValue({});
 
+      const avant = Date.now();
       prescriptionClient.listEegDemandes.mockResolvedValue([
         {
           id: 'dem-ext-004',
@@ -243,13 +243,10 @@ describe('DemandesService', () => {
 
       await service.syncPendingPrescriptions();
 
-      expect(prisma.eegDemande.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            dateCreation: new Date('2026-07-26T16:11:55.258Z'),
-          }),
-        }),
-      );
+      const createCall = prisma.eegDemande.create.mock.calls[0][0].data;
+      expect(createCall.dateCreation).toBeInstanceOf(Date);
+      expect(createCall.dateCreation.getTime()).toBeGreaterThanOrEqual(avant);
+      expect(createCall.dateCreation.toISOString()).not.toBe('2026-07-26T16:11:55.258Z');
     });
 
     // Sans roleCible, un TECHNICIEN et un CHEF_SERVICE voyaient exactement
@@ -516,14 +513,10 @@ describe('DemandesService', () => {
       );
     });
 
-    // La colonne "Heure" doit être exactement égale à l'heure d'arrivée de
-    // la notification correspondante, pas une date calculée séparément
-    // (dateCreation/dateRealisation) qui ne coïncide pas forcément avec
-    // elle (ex: dateCreation = heure de la prescription d'origine chez
-    // prescription_back, alors que la notification n'arrive qu'à la sync).
-    it('should set heureArrivee to the exact horodatage of the matching notification', async () => {
-      const dateCreationAncienne = new Date('2026-08-01T08:00:00.000Z');
-      const horodatageNotif = new Date('2026-08-01T10:30:00.000Z');
+    // La colonne "Heure" affiche l'heure d'arrivée (synchronisation locale),
+    // pas un horodatage de notification ni une date liée à un statut.
+    it('should set heureArrivee to dateCreation (the local sync time)', async () => {
+      const dateCreation = new Date('2026-08-01T08:00:00.000Z');
 
       prisma.eegDemande.findMany.mockResolvedValue([
         {
@@ -533,7 +526,7 @@ describe('DemandesService', () => {
           prescripteurId: 'doc-1',
           statut: 'CREEE',
           urgence: 'NORMALE',
-          dateCreation: dateCreationAncienne,
+          dateCreation,
           dateRealisation: null,
           dateValidation: null,
           resultat: null,
@@ -541,17 +534,20 @@ describe('DemandesService', () => {
         },
       ]);
       prisma.eegNotification.findMany.mockResolvedValue([
-        { demandeId: 'dem-200', type: 'NOUVELLE_DEMANDE', horodatage: horodatageNotif },
+        { demandeId: 'dem-200', type: 'NOUVELLE_DEMANDE', horodatage: new Date('2026-08-01T10:30:00.000Z') },
       ]);
       prescriptionClient.listEegDemandes.mockResolvedValue([]);
 
       const result = await service.getWorklist('TECHNICIEN');
 
-      expect(result.toutes![0].heureArrivee).toEqual(horodatageNotif);
-      expect(result.toutes![0].heureArrivee).not.toEqual(dateCreationAncienne);
+      expect(result.toutes![0].heureArrivee).toEqual(dateCreation);
+      expect(result.toutes![0].heureArrivee).not.toEqual(new Date('2026-08-01T10:30:00.000Z'));
     });
 
-    it('should fall back to dateRealisation for EN_COURS when no A_INTERPRETER notification exists yet', async () => {
+    // Quel que soit le statut, la colonne "Heure" reste l'heure d'arrivée :
+    // ni la date de réalisation, ni la date de validation.
+    it('should keep heureArrivee as dateCreation regardless of statut', async () => {
+      const dateCreation = new Date('2026-08-01T08:00:00.000Z');
       const dateRealisation = new Date('2026-08-01T11:00:00.000Z');
 
       prisma.eegDemande.findMany.mockResolvedValue([
@@ -562,7 +558,7 @@ describe('DemandesService', () => {
           prescripteurId: 'doc-1',
           statut: 'EN_COURS',
           urgence: 'NORMALE',
-          dateCreation: new Date('2026-08-01T08:00:00.000Z'),
+          dateCreation,
           dateRealisation,
           dateValidation: null,
           resultat: null,
@@ -574,7 +570,8 @@ describe('DemandesService', () => {
 
       const result = await service.getWorklist('CHEF_SERVICE');
 
-      expect(result.toutes![0].heureArrivee).toEqual(dateRealisation);
+      expect(result.toutes![0].heureArrivee).toEqual(dateCreation);
+      expect(result.toutes![0].heureArrivee).not.toEqual(dateRealisation);
     });
   });
 });

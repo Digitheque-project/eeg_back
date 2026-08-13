@@ -110,7 +110,10 @@ export class DemandesService {
       episodeSoinsId: p.chuId ?? '',
       prescriptionSourceId: p.id,
       prescriptionParentId: p.prescriptionParentId,
-      dateCreation: p.createdAt ? new Date(p.createdAt) : new Date(),
+      // Heure d'arrivée = le moment où la prescription entre dans le module
+      // EEG (la sync), pas l'heure de création chez prescription_back dont
+      // le fuseau est peu fiable.
+      dateCreation: new Date(),
       dateRDV: null as Date | null,
       dateRealisation: null as Date | null,
       dateValidation: null as Date | null,
@@ -156,12 +159,10 @@ export class DemandesService {
           numeroEEG: `EEG-${Date.now()}`,
           prescriptionSourceId: p.id,
           prescriptionParentId: p.prescriptionParentId,
-          // Sans ce champ, Prisma retombe sur son défaut (now()) — la date
-          // enregistrée serait alors le moment de la SYNCHRONISATION (le
-          // prochain chargement de la worklist ou passage du cron), pas le
-          // vrai moment de création chez prescription_back. C'est ce qui
-          // rendait les heures d'arrivée affichées fausses.
-          dateCreation: p.createdAt ? new Date(p.createdAt) : new Date(),
+          // Heure d'arrivée = le moment où la prescription entre dans le
+          // module EEG (la sync), pas l'heure de création chez
+          // prescription_back dont le fuseau est peu fiable.
+          dateCreation: new Date(),
           // Snapshot clinique pris à la prescription — affiché en lecture
           // seule à l'interprétation au lieu d'être ressaisi (voir
           // archiverResultat, qui les recopie ensuite dans EegResultat).
@@ -327,60 +328,22 @@ export class DemandesService {
     return false;
   }
 
-  // ─── Heure d'arrivée = heure exacte de la notification correspondante ──
-  // La worklist affichait dateCreation/dateRealisation/dateValidation —
-  // des dates calculées indépendamment de la notification qui a réellement
-  // alerté l'utilisateur, donc jamais garanties égales (ex: dateCreation
-  // = heure de la prescription d'origine chez prescription_back, alors que
-  // la notification NOUVELLE_DEMANDE n'est créée qu'au moment de la
-  // synchronisation locale, potentiellement bien plus tard). On va donc
-  // chercher l'horodatage réel de la notification associée à l'état actuel
-  // de chaque demande, avec repli sur l'ancien comportement si elle
-  // manque (données antérieures à l'introduction de ce système).
+  // ─── Heure d'arrivée = heure de synchronisation locale ─────────────
+  // La colonne "Heure" des worklists doit afficher le moment où la
+  // prescription entre réellement dans le module EEG (la sync), pas une
+  // date liée à un statut ou à l'horodatage d'une notification. Depuis
+  // que dateCreation est systématiquement défini à new Date() à la
+  // synchronisation, l'heure d'arrivée vaut toujours dateCreation.
   private async attachHeureArrivee<
     T extends {
       id: string;
-      statut: string;
       dateCreation: Date;
-      dateRealisation: Date | null;
-      dateValidation: Date | null;
     },
   >(demandes: T[]): Promise<(T & { heureArrivee: Date })[]> {
-    if (demandes.length === 0) return [];
-
-    const notifications = await this.prisma.eegNotification.findMany({
-      where: {
-        demandeId: { in: demandes.map((d) => d.id) },
-        type: { in: ['NOUVELLE_DEMANDE', 'A_INTERPRETER'] },
-      },
-      orderBy: { horodatage: 'asc' },
-      select: { demandeId: true, type: true, horodatage: true },
-    });
-
-    // orderBy asc + Map écrase avec la dernière valeur lue : on garde donc
-    // la PREMIÈRE notification de ce type pour cette demande (la plus
-    // proche de l'arrivée réelle), pas une éventuelle répétition tardive.
-    const horodatageParCle = new Map<string, Date>();
-    for (const n of notifications) {
-      const cle = `${n.demandeId}:${n.type}`;
-      if (!horodatageParCle.has(cle)) horodatageParCle.set(cle, n.horodatage);
-    }
-
-    return demandes.map((d) => {
-      let heureArrivee = d.dateCreation;
-      if (d.statut === 'EN_COURS') {
-        heureArrivee =
-          horodatageParCle.get(`${d.id}:A_INTERPRETER`) ??
-          d.dateRealisation ??
-          d.dateCreation;
-      } else if (d.statut === 'RESULTAT_DISPONIBLE') {
-        heureArrivee = d.dateValidation ?? d.dateCreation;
-      } else {
-        heureArrivee =
-          horodatageParCle.get(`${d.id}:NOUVELLE_DEMANDE`) ?? d.dateCreation;
-      }
-      return { ...d, heureArrivee };
-    });
+    return demandes.map((d) => ({
+      ...d,
+      heureArrivee: d.dateCreation,
+    }));
   }
 
   async getWorklist(role: string, token?: string) {
