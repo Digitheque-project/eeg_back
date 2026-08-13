@@ -1,4 +1,4 @@
-import { IsBoolean, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
 
 /**
  * DTO pour l'archivage du compte rendu par le chef de service.
@@ -42,6 +42,32 @@ export class ArchiverResultatDto {
   @IsString()
   @IsOptional()
   conduiteATenir?: string;
+
+  // ─── Rubriques du compte rendu officiel CHUA ────────────────────────
+  // Présentes sur le document papier mais absentes du back jusqu'ici :
+  // le générateur PDF côté eeg_front les affichait « Néant ». Acceptées et
+  // stockées ici même si TabC ne les envoie pas encore.
+
+  /** État du patient pendant l'enregistrement : "veille" | "sommeil". */
+  @IsString()
+  @IsOptional()
+  @IsIn(['veille', 'sommeil'], {
+    message: 'etatEveil doit valoir "veille" ou "sommeil"',
+  })
+  etatEveil?: string;
+
+  /** Conditions d'examen : comportement, artéfacts, étape non réalisable... */
+  @IsString()
+  @IsOptional()
+  conditions?: string;
+
+  @IsString()
+  @IsOptional()
+  noteComplementaireConclusion?: string;
+
+  @IsString()
+  @IsOptional()
+  noteComplementaireConduite?: string;
 
   @IsBoolean()
   @IsOptional()

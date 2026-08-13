@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsIn, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 /**
  * DTO d'entrée pour la rectification d'un résultat EEG immuable.
@@ -60,4 +60,29 @@ export class RectifierResultatDto {
   @IsString()
   @IsOptional()
   conduiteATenir?: string;
+
+  // ─── Rubriques du compte rendu officiel CHUA ────────────────────────
+  // Mêmes champs que ArchiverResultatDto : rectifiables comme le reste du
+  // compte rendu (voir ResultatsService.CHAMPS_CLINIQUES).
+
+  /** État du patient pendant l'enregistrement : "veille" | "sommeil". */
+  @IsString()
+  @IsOptional()
+  @IsIn(['veille', 'sommeil'], {
+    message: 'etatEveil doit valoir "veille" ou "sommeil"',
+  })
+  etatEveil?: string;
+
+  /** Conditions d'examen : comportement, artéfacts, étape non réalisable... */
+  @IsString()
+  @IsOptional()
+  conditions?: string;
+
+  @IsString()
+  @IsOptional()
+  noteComplementaireConclusion?: string;
+
+  @IsString()
+  @IsOptional()
+  noteComplementaireConduite?: string;
 }

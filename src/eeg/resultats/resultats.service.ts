@@ -141,6 +141,12 @@ export class ResultatsService {
       'testActivationSli',
       'conclusion',
       'conduiteATenir',
+      // Rubriques du compte rendu officiel CHUA — rectifiables au même
+      // titre que le reste du document.
+      'etatEveil',
+      'conditions',
+      'noteComplementaireConclusion',
+      'noteComplementaireConduite',
     ] as const;
 
     const ancienneVersion: Record<string, string | null> = {};

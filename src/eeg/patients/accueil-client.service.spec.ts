@@ -70,6 +70,45 @@ describe('AccueilClientService', () => {
       );
     });
 
+    // Accueil ne nomme pas ces champs de la même façon selon le
+    // déploiement : la normalisation doit accepter les variantes sans
+    // jamais échouer quand elles sont absentes (compte rendu officiel).
+    it('should extract adresse/contact from the raw Accueil payload', async () => {
+      const mockResponse: AxiosResponse = {
+        data: {
+          ...mockRawPatient,
+          address: '  Lot II M 12 Fianarantsoa  ',
+          telephone: '+261 34 12 345 67',
+        },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as any,
+      };
+      jest.spyOn(httpService, 'get').mockReturnValue(of(mockResponse));
+
+      const result = await service.getPatientByExternalId('CHU-2026-00001');
+
+      expect(result?.adresse).toBe('Lot II M 12 Fianarantsoa');
+      expect(result?.contact).toBe('+261 34 12 345 67');
+    });
+
+    it('should return null adresse/contact when Accueil provides none', async () => {
+      const mockResponse: AxiosResponse = {
+        data: mockRawPatient,
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as any,
+      };
+      jest.spyOn(httpService, 'get').mockReturnValue(of(mockResponse));
+
+      const result = await service.getPatientByExternalId('CHU-2026-00001');
+
+      expect(result?.adresse).toBeNull();
+      expect(result?.contact).toBeNull();
+    });
+
     it('should return null on 404 (patient not found)', async () => {
       const error = {
         response: { status: 404 },

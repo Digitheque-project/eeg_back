@@ -68,15 +68,21 @@ describe('PatientLookupService', () => {
           age: 50,
           sexe: 'M',
           priseEnChargeId: null,
+          adresse: 'Lot II M 12 Fianarantsoa',
+          contact: '+261 34 12 345 67',
         });
 
       const result = await service.getPatientInfo('CHU-2026-00001');
 
+      // adresse/contact viennent d'Accueil : ils alimentent l'en-tête du
+      // compte rendu officiel (auparavant perdus à la normalisation).
       expect(result).toEqual({
         nom: 'Fresh',
         prenom: 'Data',
         age: 50,
         sexe: 'M',
+        adresse: 'Lot II M 12 Fianarantsoa',
+        contact: '+261 34 12 345 67',
         idDossier: 'DOS-001',
         priseEnCharge: null,
         source: 'ACCUEIL',
@@ -104,6 +110,8 @@ describe('PatientLookupService', () => {
         prenom: 'Name',
         age: 40,
         sexe: 'F',
+        adresse: null,
+        contact: null,
         idDossier: null,
         priseEnCharge: null,
         source: 'FALLBACK',
@@ -146,6 +154,8 @@ describe('PatientLookupService', () => {
         age: 20,
         sexe: 'F',
         priseEnChargeId: null,
+        adresse: 'Ambozontany',
+        contact: '032 00 000 00',
       });
 
       const result = await service.attachPatientInfoToMany([
@@ -156,6 +166,61 @@ describe('PatientLookupService', () => {
       expect(result).toHaveLength(2);
       expect(result[0].patient.nom).toBe('A');
       expect(result[1].patient.nom).toBe('A');
+    });
+
+    // Le générateur de compte rendu (eeg_front) lit `adresse` / `contact` à
+    // la RACINE de l'entité, pas seulement sous `patient` — les deux
+    // emplacements doivent être servis.
+    it('should also expose adresse/contact at the root of each entity', async () => {
+      jest
+        .spyOn(prismaService.eegDossier, 'findUnique')
+        .mockResolvedValue(null);
+      jest.spyOn(accueilClient, 'getPatientByExternalId').mockResolvedValue({
+        id: 'p1',
+        nom: 'A',
+        prenom: 'B',
+        age: 20,
+        sexe: 'F',
+        priseEnChargeId: null,
+        adresse: 'Ambozontany',
+        contact: '032 00 000 00',
+      });
+
+      const [entite] = await service.attachPatientInfoToMany([
+        { id: 'e1', patientId: 'p1' },
+      ]);
+
+      expect(entite.adresse).toBe('Ambozontany');
+      expect(entite.contact).toBe('032 00 000 00');
+      expect(entite.patient.adresse).toBe('Ambozontany');
+      expect(entite.patient.contact).toBe('032 00 000 00');
+    });
+
+    // Une valeur déjà portée par l'entité (ex. adresse saisie sur la
+    // demande) ne doit pas être écrasée par celle d'Accueil.
+    it('should not overwrite an adresse already carried by the entity', async () => {
+      jest
+        .spyOn(prismaService.eegDossier, 'findUnique')
+        .mockResolvedValue(null);
+      jest.spyOn(accueilClient, 'getPatientByExternalId').mockResolvedValue({
+        id: 'p1',
+        nom: 'A',
+        prenom: 'B',
+        age: 20,
+        sexe: 'F',
+        priseEnChargeId: null,
+        adresse: 'Accueil',
+        contact: null,
+      });
+
+      const entite = await service.attachPatientInfo({
+        id: 'e1',
+        patientId: 'p1',
+        adresse: 'Adresse locale',
+      });
+
+      expect(entite.adresse).toBe('Adresse locale');
+      expect(entite.patient.adresse).toBe('Accueil');
     });
   });
 });
