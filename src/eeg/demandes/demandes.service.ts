@@ -1,4 +1,5 @@
 import { NotificationExternalService } from '../external/notification-external.service';
+import { AuditService } from '../audit/audit.service';
 import {
   PrescriptionClientService,
   PrescriptionEegDemandeFlat,
@@ -22,12 +23,22 @@ import { externalServicesConfig } from '../../common/config/external-services.co
 export class DemandesService {
   private readonly logger = new Logger(DemandesService.name);
 
+  // Verrou en mémoire (par processus) contre la course entre le cron
+  // (syncPendingPrescriptions, toutes les 30s) et getWorklist (déclenché à
+  // chaque chargement de la worklist) : sans lui, les deux pouvaient passer
+  // le contrôle "dejaNotifie" avant qu'aucun n'ait encore inséré la
+  // notification NOUVELLE_DEMANDE, la dupliquant. N'élimine pas une course
+  // entre plusieurs instances du service (nécessiterait une contrainte
+  // unique en base), mais couvre le cas réel : un seul processus Node.
+  private readonly demandesEnCoursDePromotion = new Set<string>();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationService: NotificationExternalService,
     private readonly patientLookup: PatientLookupService,
     private readonly prescriptionClient: PrescriptionClientService,
     private readonly userLookup: UserLookupService,
+    private readonly auditService: AuditService,
   ) {}
 
   // ─── Résolution prescripteur externe ──────────────────────────────
@@ -200,32 +211,45 @@ export class DemandesService {
     flatDemandes: PrescriptionEegDemandeFlat[],
     sourceIdsConnus: Set<string>,
   ): Promise<number> {
-    const nouvelles = flatDemandes.filter((d) => !sourceIdsConnus.has(d.id));
+    // Exclut aussi les demandes déjà en cours de promotion par un appel
+    // concurrent (cron + getWorklist quasi simultanés) — sans ça, les deux
+    // repartent du même `sourceIdsConnus` (calculé avant l'entrée ici) et
+    // dupliquent la promotion + la notification.
+    const nouvelles = flatDemandes.filter(
+      (d) =>
+        !sourceIdsConnus.has(d.id) &&
+        !this.demandesEnCoursDePromotion.has(d.id),
+    );
+    nouvelles.forEach((d) => this.demandesEnCoursDePromotion.add(d.id));
 
-    for (const d of nouvelles) {
-      const demande = await this.promoteToLocal(d);
+    try {
+      for (const d of nouvelles) {
+        const demande = await this.promoteToLocal(d);
 
-      const dejaNotifie = await this.prisma.eegNotification.findFirst({
-        where: { demandeId: demande.id, type: 'NOUVELLE_DEMANDE' },
-      });
-      if (dejaNotifie) continue;
+        const dejaNotifie = await this.prisma.eegNotification.findFirst({
+          where: { demandeId: demande.id, type: 'NOUVELLE_DEMANDE' },
+        });
+        if (dejaNotifie) continue;
 
-      this.logger.log(
-        `🔔 Notification locale pour ${demande.numeroEEG} (typeEEG: ${demande.typeEEG})`,
-      );
-      await this.prisma.eegNotification.create({
-        data: {
-          niveau: demande.urgence,
-          type: 'NOUVELLE_DEMANDE',
-          titre: 'Nouvelle demande EEG',
-          message: `${demande.numeroEEG} — ${demande.typeEEG}`,
-          patientId: demande.patientId,
-          demandeId: demande.id,
-          // Concerne le TECHNICIEN (à lui de planifier/réaliser) — pas le
-          // CHEF_SERVICE, qui n'agit qu'une fois l'examen réalisé.
-          roleCible: 'TECHNICIEN',
-        },
-      });
+        this.logger.log(
+          `🔔 Notification locale pour ${demande.numeroEEG} (typeEEG: ${demande.typeEEG})`,
+        );
+        await this.prisma.eegNotification.create({
+          data: {
+            niveau: demande.urgence,
+            type: 'NOUVELLE_DEMANDE',
+            titre: 'Nouvelle demande EEG',
+            message: `${demande.numeroEEG} — ${demande.typeEEG}`,
+            patientId: demande.patientId,
+            demandeId: demande.id,
+            // Concerne le TECHNICIEN (à lui de planifier/réaliser) — pas le
+            // CHEF_SERVICE, qui n'agit qu'une fois l'examen réalisé.
+            roleCible: 'TECHNICIEN',
+          },
+        });
+      }
+    } finally {
+      nouvelles.forEach((d) => this.demandesEnCoursDePromotion.delete(d.id));
     }
     return nouvelles.length;
   }
@@ -455,6 +479,7 @@ export class DemandesService {
     id: string,
     motif: string,
     technicienId: string,
+    role: string,
     token?: string,
   ) {
     if (!motif?.trim()) throw new BadRequestException('Motif obligatoire');
@@ -468,10 +493,26 @@ export class DemandesService {
       'REFUSEE',
       motif,
     );
+    await this.auditService.log({
+      utilisateurId: technicienId,
+      role,
+      action: 'ANNULATION',
+      entite: 'EegDemande',
+      entiteId: demandeMaj.id,
+      patientId: demandeMaj.patientId,
+      demandeId: demandeMaj.id,
+      detail: { type: 'refus', motif },
+    });
     return demandeMaj;
   }
 
-  async annulerDemande(id: string, motif: string, token?: string) {
+  async annulerDemande(
+    id: string,
+    motif: string,
+    utilisateurId: string,
+    role: string,
+    token?: string,
+  ) {
     if (!motif?.trim()) throw new BadRequestException('Motif obligatoire');
     const d = await this.resolveOrPromote(id, token);
     if (['ANNULEE', 'RESULTAT_DISPONIBLE'].includes(d.statut)) {
@@ -486,6 +527,16 @@ export class DemandesService {
       'ANNULEE',
       motif,
     );
+    await this.auditService.log({
+      utilisateurId,
+      role,
+      action: 'ANNULATION',
+      entite: 'EegDemande',
+      entiteId: demandeMaj.id,
+      patientId: demandeMaj.patientId,
+      demandeId: demandeMaj.id,
+      detail: { type: 'annulation', motif },
+    });
     return demandeMaj;
   }
 
@@ -493,6 +544,7 @@ export class DemandesService {
     id: string,
     dto: PlanifierRdvDto,
     technicienId: string,
+    role: string,
     token?: string,
   ) {
     const d = await this.resolveOrPromote(id, token);
@@ -507,6 +559,14 @@ export class DemandesService {
     }
     const dureeMinutes = dto.dureeMinutes ?? 60;
     const heureFin = ajouterMinutes(dto.heureDebut, dureeMinutes);
+    // ajouterMinutes boucle sur 24h (modulo) : un créneau qui dépasse
+    // minuit produirait une heureFin "plus petite" que heureDebut, ce qui
+    // fausserait silencieusement la détection de chevauchement ci-dessous.
+    if (heureFin <= dto.heureDebut) {
+      throw new BadRequestException(
+        'Ce créneau dépasse minuit — impossible à planifier sur une seule journée',
+      );
+    }
 
     // Conflit = chevauchement de créneau (heureDebut < heureFin existant et
     // heureFin > heureDebut existant), pas une simple égalité de l'heure de
@@ -531,34 +591,54 @@ export class DemandesService {
     const prescripteurIdRdv =
       d.prescripteurId ?? externalServicesConfig.defaultChefServiceUserId ?? '';
 
-    await this.prisma.eegRdv.create({
-      data: {
-        patientId: d.patientId,
-        prescripteurId: prescripteurIdRdv,
-        demandeId: d.id,
-        typeEEG: d.typeEEG,
-        priorite: d.urgence,
-        dateRdv,
-        heureDebut: dto.heureDebut,
-        heureFin,
-        dureeMinutes,
-        renseignementClinique: d.motifPrescription,
-      },
-    });
-
-    const demandeMaj = await this.prisma.eegDemande.update({
-      where: { id: d.id },
-      data: { statut: 'PLANIFIEE', dateRDV: dateRdv, technicienId },
-    });
+    // Création du RDV + passage de la demande à PLANIFIEE dans une même
+    // transaction : sinon un crash entre les deux appels laisse un RDV
+    // orphelin attaché à une demande restée CREEE, et EegRdv.demandeId
+    // étant unique, plus aucune replanification n'est possible ensuite.
+    const [, demandeMaj] = await this.prisma.$transaction([
+      this.prisma.eegRdv.create({
+        data: {
+          patientId: d.patientId,
+          prescripteurId: prescripteurIdRdv,
+          demandeId: d.id,
+          typeEEG: d.typeEEG,
+          priorite: d.urgence,
+          dateRdv,
+          heureDebut: dto.heureDebut,
+          heureFin,
+          dureeMinutes,
+          renseignementClinique: d.motifPrescription,
+        },
+      }),
+      this.prisma.eegDemande.update({
+        where: { id: d.id },
+        data: { statut: 'PLANIFIEE', dateRDV: dateRdv, technicienId },
+      }),
+    ]);
     this.syncStatutToSource(
       d.prescriptionParentId,
       d.prescriptionSourceId,
       'PLANIFIEE',
     );
+    await this.auditService.log({
+      utilisateurId: technicienId,
+      role,
+      action: 'MODIFICATION',
+      entite: 'EegDemande',
+      entiteId: demandeMaj.id,
+      patientId: demandeMaj.patientId,
+      demandeId: demandeMaj.id,
+      detail: { type: 'planification', dateRdv: dto.dateRDV, heureDebut: dto.heureDebut },
+    });
     return demandeMaj;
   }
 
-  async realiserDemande(id: string, techId: string, token?: string) {
+  async realiserDemande(
+    id: string,
+    techId: string,
+    role: string,
+    token?: string,
+  ) {
     const d = await this.resolveOrPromote(id, token);
     if (!(
       (d.statut === 'CREEE' && d.urgence === 'STAT') ||
@@ -624,6 +704,17 @@ export class DemandesService {
       },
     });
 
+    await this.auditService.log({
+      utilisateurId: techId,
+      role,
+      action: 'MODIFICATION',
+      entite: 'EegDemande',
+      entiteId: demandeMaj.id,
+      patientId: demandeMaj.patientId,
+      demandeId: demandeMaj.id,
+      detail: { type: 'realisation' },
+    });
+
     return demandeMaj;
   }
 
@@ -631,6 +722,7 @@ export class DemandesService {
     id: string,
     compteRendu: ArchiverResultatDto,
     chefId: string,
+    role: string,
   ) {
     // resolveOrPromote (plutôt que getDemandeById) garantit une demande
     // réellement persistée : l'archivage écrit un EegResultat rattaché à
@@ -704,11 +796,39 @@ export class DemandesService {
       'RESULTAT_DISPONIBLE',
     );
 
+    const estCritique = compteRendu.estCritique ?? false;
+
+    // Un résultat critique doit déclencher une alerte immédiate — pas
+    // seulement apparaître plus tard dans le rapport "Anomalies". TabC
+    // (front) l'annonce explicitement au chef de service : « déclenchera
+    // une alerte pour le prescripteur ». Avant ce correctif, estCritique
+    // n'avait aucune conséquence de notification, seulement lu passivement
+    // dans /eeg/rapports/anomalies.
+    if (estCritique) {
+      await this.prisma.eegNotification.create({
+        data: {
+          niveau: d.urgence,
+          type: 'ALERTE_CRITIQUE',
+          titre: 'Résultat EEG critique',
+          message: `${demandeMaj.numeroEEG} — résultat critique disponible, à prendre en compte immédiatement`,
+          patientId: demandeMaj.patientId,
+          demandeId: demandeMaj.id,
+          // Visible par tout le service (pas de rôle EEG "prescripteur") —
+          // l'alerte externe ci-dessous relaie vers le prescripteur.
+          roleCible: null,
+        },
+      });
+    }
+
     this.notificationService
       .sendNotification({
-        type: 'RESULTAT_DISPONIBLE',
-        motif: `Résultat EEG disponible pour la demande ${demandeMaj.numeroEEG}`,
-        urgence: d.urgence,
+        type: estCritique ? 'RESULTAT_CRITIQUE' : 'RESULTAT_DISPONIBLE',
+        motif: estCritique
+          ? `Résultat EEG CRITIQUE pour la demande ${demandeMaj.numeroEEG} — à consulter immédiatement`
+          : `Résultat EEG disponible pour la demande ${demandeMaj.numeroEEG}`,
+        // Un résultat critique force le niveau d'urgence de la notification
+        // externe, quelle que soit l'urgence d'origine de la demande.
+        urgence: estCritique ? 'STAT' : d.urgence,
         sourceServiceId: externalServicesConfig.eegServiceId,
         sourceServiceName: 'EEG',
         patientId: demandeMaj.patientId,
@@ -717,6 +837,17 @@ export class DemandesService {
       .catch((err: unknown) =>
         console.error('Erreur notification:', getErrorMessage(err)),
       );
+
+    await this.auditService.log({
+      utilisateurId: chefId,
+      role,
+      action: 'VALIDATION',
+      entite: 'EegResultat',
+      entiteId: localId,
+      patientId: demandeMaj.patientId,
+      demandeId: demandeMaj.id,
+      detail: { estCritique },
+    });
 
     return demandeMaj;
   }

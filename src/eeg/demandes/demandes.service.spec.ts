@@ -6,6 +6,7 @@ import { PatientLookupService } from '../patients/patient-lookup.service';
 import { PrescriptionClientService } from '../external/prescription-client.service';
 import { UserLookupService } from '../../common/clients/user-lookup.service';
 import { externalServicesConfig } from '../../common/config/external-services.config';
+import { AuditService } from '../audit/audit.service';
 
 describe('DemandesService', () => {
   let service: DemandesService;
@@ -60,6 +61,10 @@ describe('DemandesService', () => {
     ),
   };
 
+  const mockAuditService = {
+    log: jest.fn().mockResolvedValue(undefined),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -69,6 +74,7 @@ describe('DemandesService', () => {
         { provide: PatientLookupService, useValue: mockPatientLookup },
         { provide: PrescriptionClientService, useValue: mockPrescriptionClient },
         { provide: UserLookupService, useValue: mockUserLookup },
+        { provide: AuditService, useValue: mockAuditService },
       ],
     }).compile();
 
@@ -304,7 +310,7 @@ describe('DemandesService', () => {
       });
       prisma.eegNotification.create.mockResolvedValue({});
 
-      await service.realiserDemande('dem-500', 'tech-001');
+      await service.realiserDemande('dem-500', 'tech-001', 'TECHNICIEN');
 
       expect(prisma.eegNotification.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -338,7 +344,7 @@ describe('DemandesService', () => {
       prisma.eegRdv.update.mockResolvedValue({ id: 'rdv-501', statut: 'REALISE' });
       prisma.eegNotification.create.mockResolvedValue({});
 
-      await service.realiserDemande('dem-501', 'tech-001');
+      await service.realiserDemande('dem-501', 'tech-001', 'TECHNICIEN');
 
       expect(prisma.eegRdv.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -368,7 +374,7 @@ describe('DemandesService', () => {
       });
       prisma.eegNotification.create.mockResolvedValue({});
 
-      await service.realiserDemande('dem-502', 'tech-001');
+      await service.realiserDemande('dem-502', 'tech-001', 'TECHNICIEN');
 
       expect(prisma.eegRdv.update).not.toHaveBeenCalled();
     });
@@ -406,6 +412,7 @@ describe('DemandesService', () => {
         'dem-clin-001',
         { autresRc: 'Antécédent familial', conclusion: 'Tracé normal' } as any,
         'chef-001',
+        'CHEF_SERVICE',
       );
 
       expect(prisma.eegResultat.create).toHaveBeenCalledWith(
@@ -445,6 +452,7 @@ describe('DemandesService', () => {
           noteComplementaireConduite: 'Poursuivre le traitement',
         } as any,
         'chef-001',
+        'CHEF_SERVICE',
       );
 
       expect(prisma.eegResultat.create).toHaveBeenCalledWith(
@@ -473,6 +481,7 @@ describe('DemandesService', () => {
         'dem-clin-001',
         { conclusion: 'Tracé normal' } as any,
         'chef-001',
+        'CHEF_SERVICE',
       );
 
       expect(prisma.eegResultat.create).toHaveBeenCalledWith(

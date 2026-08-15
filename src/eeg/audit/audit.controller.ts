@@ -3,6 +3,10 @@ import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { ActionAudit } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
+// Pas de @Roles ici : le dashboard (visible aux 3 rôles EEG) alimente son
+// widget "Dernières activités" depuis cet endpoint pour tout le monde — le
+// restreindre casserait ce widget pour TECHNICIEN. Reste protégé par
+// JwtAuthGuard (authentification requise) comme le reste de l'API.
 @ApiTags('Audit')
 @Controller('eeg/audit')
 export class AuditController {

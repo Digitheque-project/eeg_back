@@ -95,6 +95,11 @@ export class ResultatsController {
     @Request() req: AuthenticatedRequest,
   ) {
     const auteurId = req.user!.id;
-    return this.resultatsService.rectifierResultat(id, dto, auteurId);
+    return this.resultatsService.rectifierResultat(
+      id,
+      dto,
+      auteurId,
+      req.user!.role,
+    );
   }
 }
