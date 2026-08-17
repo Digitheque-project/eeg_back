@@ -34,6 +34,25 @@ async function main() {
   // n'est enregistrée ici qu'au moment où un technicien agit dessus
   // (planifier, refuser, réaliser). Voir DemandesService.resolveOrPromote.
 
+  // ─── Personnel du service (compte rendu officiel) ────────────────────
+  // Ligne unique servie par GET /eeg/config/personnel-service. Semée vide :
+  // le front affiche « Néant » tant que le CHEF_SERVICE / MAJOR_SERVICE n'a
+  // pas renseigné les vrais noms via PUT. Aucune valeur d'exemple ici pour
+  // ne pas risquer d'imprimer un faux nom sur un document médical.
+  const personnelExistant = await prisma.personnelServiceNeurologie.findFirst();
+  if (!personnelExistant) {
+    await prisma.personnelServiceNeurologie.create({
+      data: {
+        chefDeService: '',
+        medecins: [],
+        majorDeService: '',
+        techniciens: [],
+        telephoneRdv: '',
+      },
+    });
+    console.log('✅ Personnel du service (vide, à renseigner via PUT)');
+  }
+
   console.log('🎉 Seed terminé !');
 }
 

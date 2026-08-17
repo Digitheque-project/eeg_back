@@ -11,6 +11,10 @@ export interface PatientInfo {
   prenom: string | null;
   age: number | null;
   sexe: string | null;
+  /** Adresse du patient (Accueil) — imprimée sur le compte rendu officiel. */
+  adresse: string | null;
+  /** Téléphone/contact du patient (Accueil) — idem. */
+  contact: string | null;
   idDossier: string | null;
   priseEnCharge: PriseEnChargeDto | null;
   source: 'ACCUEIL' | 'FALLBACK';
@@ -21,6 +25,8 @@ export interface PatientFallback {
   prenom?: string;
   age?: number;
   sexe?: string;
+  adresse?: string;
+  contact?: string;
 }
 
 @Injectable()
@@ -58,6 +64,10 @@ export class PatientLookupService {
         prenom: accueilPatient.prenom || null,
         age: accueilPatient.age,
         sexe: accueilPatient.sexe,
+        // Accueil reste la source de vérité ; si le champ n'existe pas
+        // là-bas, on retombe sur ce que l'appelant a pu fournir.
+        adresse: accueilPatient.adresse ?? fallback?.adresse ?? null,
+        contact: accueilPatient.contact ?? fallback?.contact ?? null,
         idDossier,
         priseEnCharge,
         source: 'ACCUEIL',
@@ -72,6 +82,8 @@ export class PatientLookupService {
       prenom: fallback?.prenom ?? null,
       age: fallback?.age ?? null,
       sexe: fallback?.sexe ?? null,
+      adresse: fallback?.adresse ?? null,
+      contact: fallback?.contact ?? null,
       idDossier,
       priseEnCharge: null,
       source: 'FALLBACK',
@@ -112,18 +124,37 @@ export class PatientLookupService {
    * Attach a `patient` field to an entity carrying a `patientId`, replacing
    * the old Prisma `include: { patient: true }` pattern now that there is
    * no more local Patient relation.
+   *
+   * `adresse` / `contact` sont AUSSI exposés à la racine de l'entité (en
+   * plus de `patient.*`) : le générateur de compte rendu côté eeg_front les
+   * lit à la racine de la demande / du résultat. Une valeur déjà portée par
+   * l'entité elle-même n'est jamais écrasée.
    */
   async attachPatientInfo<T extends { patientId: string }>(
     entity: T,
     fallback?: PatientFallback,
-  ): Promise<T & { patient: PatientInfo }> {
+  ): Promise<
+    T & { patient: PatientInfo; adresse: string | null; contact: string | null }
+  > {
     const patient = await this.getPatientInfo(entity.patientId, fallback);
-    return { ...entity, patient };
+    const brut = entity as Record<string, unknown>;
+    return {
+      ...entity,
+      patient,
+      adresse: (brut.adresse as string | null | undefined) ?? patient.adresse,
+      contact: (brut.contact as string | null | undefined) ?? patient.contact,
+    };
   }
 
   async attachPatientInfoToMany<T extends { patientId: string }>(
     entities: T[],
-  ): Promise<(T & { patient: PatientInfo })[]> {
+  ): Promise<
+    (T & {
+      patient: PatientInfo;
+      adresse: string | null;
+      contact: string | null;
+    })[]
+  > {
     return Promise.all(
       entities.map((entity) => this.attachPatientInfo(entity)),
     );

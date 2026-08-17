@@ -176,6 +176,16 @@ model EegResultat {
   conclusion     String?
   conduiteATenir String?
 
+  // Champs du compte rendu officiel CHUA absents jusqu'ici — le front les
+  // affichait « Néant » faute de colonne côté back.
+  // etatEveil : "veille" | "sommeil" (état du patient pendant l'examen).
+  // conditions : comportement, artéfacts, étape non réalisable...
+  // notes complémentaires : texte libre ajouté sous CONCLUSION / CONDUITE.
+  etatEveil                    String?
+  conditions                   String?
+  noteComplementaireConclusion String?
+  noteComplementaireConduite   String?
+
   medecinValidateurId String?
   dateValidation      DateTime?
   estImmutable        Boolean   @default(false)
@@ -268,4 +278,22 @@ model EegAudit {
   demande EegDemande? @relation(fields: [demandeId], references: [id])
 
   @@map("eeg_audit")
+}
+
+// Personnel du service de Neurologie affiché dans l'en-tête / le pied du
+// compte rendu EEG officiel (chef de service, médecins, major, techniciens,
+// téléphone RDV). Singleton métier : une seule ligne, éditable par le
+// CHEF_SERVICE / MAJOR_SERVICE via PUT /eeg/config/personnel-service.
+// Ce n'est PAS un annuaire d'utilisateurs (celui-ci reste user-services) :
+// juste les libellés imprimés sur le document papier.
+model PersonnelServiceNeurologie {
+  id             String   @id @default(uuid())
+  chefDeService  String
+  medecins       String[]
+  majorDeService String
+  techniciens    String[]
+  telephoneRdv   String
+  updatedAt      DateTime @updatedAt
+
+  @@map("personnel_service_neurologie")
 }

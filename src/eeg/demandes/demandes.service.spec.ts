@@ -422,6 +422,126 @@ describe('DemandesService', () => {
         }),
       );
     });
+
+    // Rubriques du compte rendu officiel CHUA ajoutées côté back : sans
+    // elles, le générateur PDF du front n'avait rien à afficher (« Néant »).
+    it('should persist etatEveil, conditions and both notes complémentaires', async () => {
+      prisma.eegDemande.findFirst.mockResolvedValue(demandeEnCours);
+      prisma.eegResultat.findUnique.mockResolvedValue(null);
+      prisma.eegResultat.create.mockResolvedValue({});
+      prisma.eegDemande.update.mockResolvedValue({
+        id: 'dem-clin-001',
+        patientId: 'PAT-CLIN-001',
+        numeroEEG: 'EEG-CLIN-001',
+      });
+
+      await service.archiverResultat(
+        'dem-clin-001',
+        {
+          conclusion: 'Tracé normal',
+          etatEveil: 'veille',
+          conditions: 'Patient calme, quelques artéfacts musculaires',
+          noteComplementaireConclusion: 'À recontrôler dans 6 mois',
+          noteComplementaireConduite: 'Poursuivre le traitement',
+        } as any,
+        'chef-001',
+      );
+
+      expect(prisma.eegResultat.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            etatEveil: 'veille',
+            conditions: 'Patient calme, quelques artéfacts musculaires',
+            noteComplementaireConclusion: 'À recontrôler dans 6 mois',
+            noteComplementaireConduite: 'Poursuivre le traitement',
+          }),
+        }),
+      );
+    });
+
+    it('should store null for the compte rendu fields when not provided', async () => {
+      prisma.eegDemande.findFirst.mockResolvedValue(demandeEnCours);
+      prisma.eegResultat.findUnique.mockResolvedValue(null);
+      prisma.eegResultat.create.mockResolvedValue({});
+      prisma.eegDemande.update.mockResolvedValue({
+        id: 'dem-clin-001',
+        patientId: 'PAT-CLIN-001',
+        numeroEEG: 'EEG-CLIN-001',
+      });
+
+      await service.archiverResultat(
+        'dem-clin-001',
+        { conclusion: 'Tracé normal' } as any,
+        'chef-001',
+      );
+
+      expect(prisma.eegResultat.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            etatEveil: null,
+            conditions: null,
+            noteComplementaireConclusion: null,
+            noteComplementaireConduite: null,
+          }),
+        }),
+      );
+    });
+  });
+
+  // Le compte rendu officiel a besoin, à la RACINE de la demande, de la
+  // date/heure d'examen et du renseignement clinique — sans quoi le front
+  // affiche « Néant » alors que l'information existe côté RDV.
+  describe('getDemandeById — champs du compte rendu', () => {
+    it('should expose renseignementClinique, dateExamen and heuresExamen at the root', async () => {
+      const dateRealisation = new Date('2026-08-10T08:30:00.000Z');
+      prisma.eegDemande.findFirst.mockResolvedValue({
+        id: 'dem-cr-001',
+        numeroEEG: 'EEG-CR-001',
+        patientId: 'PAT-CR-001',
+        prescripteurId: 'doc-1',
+        statut: 'RESULTAT_DISPONIBLE',
+        dateCreation: new Date('2026-08-09T07:00:00.000Z'),
+        dateRealisation,
+        dateRDV: new Date('2026-08-10T00:00:00.000Z'),
+        motifPrescription: 'Bilan épilepsie',
+        resultat: { id: 'res-1', etatEveil: 'veille' },
+        rdv: {
+          heureDebut: '08:30',
+          renseignementClinique: 'Crises nocturnes répétées',
+        },
+      });
+
+      const result: any = await service.getDemandeById('dem-cr-001');
+
+      expect(result.renseignementClinique).toBe('Crises nocturnes répétées');
+      expect(result.dateExamen).toEqual(dateRealisation);
+      expect(result.heuresExamen).toBe('08:30');
+      // Champs existants inchangés
+      expect(result.numeroEEG).toBe('EEG-CR-001');
+      expect(result.dateRealisation).toEqual(dateRealisation);
+    });
+
+    it('should fall back to motifPrescription and dateRDV when no RDV data', async () => {
+      const dateRDV = new Date('2026-08-12T00:00:00.000Z');
+      prisma.eegDemande.findFirst.mockResolvedValue({
+        id: 'dem-cr-002',
+        numeroEEG: 'EEG-CR-002',
+        patientId: 'PAT-CR-002',
+        statut: 'PLANIFIEE',
+        dateCreation: new Date('2026-08-11T07:00:00.000Z'),
+        dateRealisation: null,
+        dateRDV,
+        motifPrescription: 'Suspicion épilepsie',
+        resultat: null,
+        rdv: null,
+      });
+
+      const result: any = await service.getDemandeById('dem-cr-002');
+
+      expect(result.renseignementClinique).toBe('Suspicion épilepsie');
+      expect(result.dateExamen).toEqual(dateRDV);
+      expect(result.heuresExamen).toBeNull();
+    });
   });
 
   // getWorklist doit désormais promouvoir + notifier immédiatement toute
