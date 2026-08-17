@@ -56,6 +56,11 @@ function deriveEegServiceId(): string {
 }
 
 export const externalServicesConfig = {
+  // Secret HS256 partagé avec le service SSO externe — signe les JWT que
+  // JwtAuthGuard vérifie. Sans cette variable, le guard ne peut PAS
+  // vérifier la signature des tokens (voir jwt-auth.guard.ts).
+  jwtSecret: readEnv('JWT_SECRET'),
+
   // Identité de ce CHU / de ce service EEG dans le système multi-CHU
   chuId: readEnv('CHU_ID'),
   eegServiceId: deriveEegServiceId(),

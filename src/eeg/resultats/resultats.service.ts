@@ -6,6 +6,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { RectifierResultatDto } from './dto/rectifier-resultat.dto';
 import { UploadClientService } from '../external/upload-client.service';
+import { AuditService } from '../audit/audit.service';
 import * as path from 'path';
 
 @Injectable()
@@ -13,6 +14,7 @@ export class ResultatsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly uploadClient: UploadClientService,
+    private readonly auditService: AuditService,
   ) {}
 
   // ─── Upload image tracé (PNG/JPG uniquement) ───────────────────────
@@ -112,9 +114,11 @@ export class ResultatsService {
     resultatId: string,
     dto: RectifierResultatDto,
     auteurId: string,
+    role: string,
   ) {
     const resultat = await this.prisma.eegResultat.findUnique({
       where: { id: resultatId },
+      include: { demande: { select: { patientId: true } } },
     });
     if (!resultat) {
       throw new NotFoundException(`Résultat ${resultatId} introuvable`);
@@ -175,10 +179,23 @@ export class ResultatsService {
       },
     });
 
-    return this.prisma.eegResultat.update({
+    const resultatMaj = await this.prisma.eegResultat.update({
       where: { id: resultatId },
       data: miseAJour,
       include: { rectifications: true },
     });
+
+    await this.auditService.log({
+      utilisateurId: auteurId,
+      role,
+      action: 'MODIFICATION',
+      entite: 'EegResultat',
+      entiteId: resultatId,
+      patientId: resultat.demande.patientId,
+      demandeId: resultat.demandeId,
+      detail: { type: 'rectification', motif: dto.motif, champs: Object.keys(nouvelleVersion) },
+    });
+
+    return resultatMaj;
   }
 }

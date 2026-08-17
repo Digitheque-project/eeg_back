@@ -3,6 +3,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ResultatsService } from './resultats.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UploadClientService } from '../external/upload-client.service';
+import { AuditService } from '../audit/audit.service';
 
 describe('ResultatsService', () => {
   let service: ResultatsService;
@@ -20,12 +21,17 @@ describe('ResultatsService', () => {
     getFile: jest.fn(),
   };
 
+  const mockAuditService = {
+    log: jest.fn().mockResolvedValue(undefined),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ResultatsService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: UploadClientService, useValue: mockUploadClient },
+        { provide: AuditService, useValue: mockAuditService },
       ],
     }).compile();
 
@@ -134,6 +140,7 @@ describe('ResultatsService', () => {
       conditions: null,
       noteComplementaireConclusion: null,
       noteComplementaireConduite: null,
+      demande: { patientId: 'PAT-001' },
     };
 
     it('should reject a résultat that is not yet immuable', async () => {
@@ -143,7 +150,7 @@ describe('ResultatsService', () => {
       });
 
       await expect(
-        service.rectifierResultat('res-001', { motif: 'Erreur' } as any, 'chef-001'),
+        service.rectifierResultat('res-001', { motif: 'Erreur' } as any, 'chef-001', 'CHEF_SERVICE'),
       ).rejects.toThrow(BadRequestException);
       expect(prisma.eegRectification.create).not.toHaveBeenCalled();
     });
@@ -165,6 +172,7 @@ describe('ResultatsService', () => {
           noteComplementaireConduite: 'Adapter la posologie',
         } as any,
         'chef-001',
+        'CHEF_SERVICE',
       );
 
       expect(prisma.eegRectification.create).toHaveBeenCalledWith(
@@ -205,6 +213,7 @@ describe('ResultatsService', () => {
         'res-001',
         { motif: 'Coquille', conclusion: 'Tracé normal pour l’âge' } as any,
         'chef-001',
+        'CHEF_SERVICE',
       );
 
       const data = prisma.eegResultat.update.mock.calls[0][0].data;
