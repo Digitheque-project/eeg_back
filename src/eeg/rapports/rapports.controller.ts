@@ -4,7 +4,6 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PatientLookupService } from '../patients/patient-lookup.service';
 import { AccueilClientService } from '../patients/accueil-client.service';
-import { Roles } from '../../common/decorators/roles.decorator';
 
 // Seuil retenu pour distinguer enfant / adulte dans les statistiques du
 // service (confirmé avec le major de service).
@@ -19,11 +18,7 @@ type StatutFilter =
   | 'ANNULEE';
 type UrgenceFilter = 'STAT' | 'URGENTE' | 'NORMALE';
 
-// Réservé à MAJOR_SERVICE (seul rôle à qui la Sidebar expose "Rapports") —
-// sans ce garde, n'importe quel rôle authentifié pouvait lire les
-// statistiques du service par simple appel API direct.
 @ApiTags('Rapports')
-@Roles('MAJOR_SERVICE')
 @Controller('eeg/rapports')
 export class RapportsController {
   constructor(

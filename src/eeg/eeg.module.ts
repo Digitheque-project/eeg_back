@@ -8,7 +8,6 @@ import { ResultatsService } from './resultats/resultats.service';
 import { RapportsController } from './rapports/rapports.controller';
 import { ArchivesController } from './archives/archives.controller';
 import { AuditController } from './audit/audit.controller';
-import { AuditService } from './audit/audit.service';
 import { NotificationsController } from './notifications/notifications.controller';
 import { RdvsController } from './rdvs/rdvs.controller';
 import { PatientsController } from './patients/patients.controller';
@@ -37,7 +36,6 @@ import { PersonnelServiceService } from './config/personnel-service.service';
     ResultatsService,
     EegSchedulerService,
     PersonnelServiceService,
-    AuditService,
   ],
 })
 export class EegModule {}

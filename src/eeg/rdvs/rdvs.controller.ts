@@ -7,7 +7,6 @@ import {
   Param,
   Body,
   Query,
-  Request,
   Logger,
   BadRequestException,
   NotFoundException,
@@ -21,9 +20,6 @@ import { CreateRdvDto } from './dto/create-rdv.dto';
 import { ModifierRdvDto } from './dto/modifier-rdv.dto';
 import { RealiserRdvDto } from './dto/realiser-rdv.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { DemandesService } from '../demandes/demandes.service';
-import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
-import { BearerToken } from '../../common/decorators/bearer-token.decorator';
 
 @Controller('eeg/rdvs')
 export class RdvsController {
@@ -44,7 +40,6 @@ export class RdvsController {
     private readonly prisma: PrismaService,
     private readonly patientLookup: PatientLookupService,
     private readonly userLookup: UserLookupService,
-    private readonly demandesService: DemandesService,
   ) {}
 
   // Contrôle de chevauchement de créneau (pas simple égalité de l'heure de
@@ -54,7 +49,6 @@ export class RdvsController {
     heureDebut: string,
     dureeMinutes: number,
     exclureRdvId?: string,
-    heureFinExplicite?: string,
   ) {
     const rdvs = await this.prisma.eegRdv.findMany({
       where: {
@@ -64,11 +58,7 @@ export class RdvsController {
       },
       select: { heureDebut: true, heureFin: true, dureeMinutes: true },
     });
-    // Une heureFin explicitement fournie (appelants API hors formulaire
-    // simplifié) prime sur celle dérivée de dureeMinutes — sinon un
-    // chevauchement portant uniquement sur une heureFin modifiée passait
-    // inaperçu.
-    const heureFin = heureFinExplicite ?? ajouterMinutes(heureDebut, dureeMinutes);
+    const heureFin = ajouterMinutes(heureDebut, dureeMinutes);
     return rdvs.find(
       (r) =>
         heureDebut <
@@ -178,7 +168,8 @@ export class RdvsController {
   }
 
   // Fait doublon avec demandes.controller.ts:planifierRdv (le vrai flux de
-  // planification côté worklist). Gardé pour compat API, sans UI dédiée.
+  // planification côté worklist) — pas de conflit de créneau vérifié ici,
+  // contrairement à ce dernier. Gardé pour compat API, sans UI dédiée.
   @Roles('TECHNICIEN', 'CHEF_SERVICE')
   @Post()
   async creerRdv(@Body() body: CreateRdvDto) {
@@ -189,18 +180,10 @@ export class RdvsController {
       );
     }
     const dureeMinutes = body.dureeMinutes ?? 60;
-    const heureFinCalculee = body.heureFin ?? ajouterMinutes(body.heureDebut, dureeMinutes);
-    if (heureFinCalculee <= body.heureDebut) {
-      throw new BadRequestException(
-        'Ce créneau dépasse minuit — impossible à planifier sur une seule journée',
-      );
-    }
     const conflit = await this.trouverConflitRdv(
       dateRdv,
       body.heureDebut,
       dureeMinutes,
-      undefined,
-      body.heureFin,
     );
     if (conflit) throw new BadRequestException('Créneau déjà occupé');
     const rdv = await this.prisma.eegRdv.create({
@@ -212,7 +195,7 @@ export class RdvsController {
         priorite: body.priorite,
         dateRdv,
         heureDebut: body.heureDebut,
-        heureFin: heureFinCalculee,
+        heureFin: body.heureFin ?? ajouterMinutes(body.heureDebut, dureeMinutes),
         dureeMinutes,
         renseignementClinique: body.renseignementClinique ?? null,
       },
@@ -252,34 +235,22 @@ export class RdvsController {
     } else if (body.heureDebut && body.dureeMinutes) {
       data.heureFin = ajouterMinutes(body.heureDebut, body.dureeMinutes);
     }
-    if (data.heureFin) {
-      const heureDebutEffective = data.heureDebut ?? existant.heureDebut;
-      if (data.heureFin <= heureDebutEffective) {
-        throw new BadRequestException(
-          'Ce créneau dépasse minuit — impossible à planifier sur une seule journée',
-        );
-      }
-    }
     if (body.statut) data.statut = body.statut;
     if (body.renseignementClinique !== undefined)
       data.renseignementClinique = body.renseignementClinique;
 
-    // Vérifier le chevauchement dès que date/heure/durée/fin changent (le
-    // RDV modifié lui-même est exclu du contrôle) — heureFin seule doit
-    // aussi déclencher le contrôle, sinon un chevauchement introduit en ne
-    // changeant que la fin du créneau passait inaperçu.
-    if (body.dateRdv || body.heureDebut || body.dureeMinutes || body.heureFin) {
+    // Vérifier le chevauchement dès que date/heure/durée changent (le RDV
+    // modifié lui-même est exclu du contrôle).
+    if (body.dateRdv || body.heureDebut || body.dureeMinutes) {
       const nouvelleDate = data.dateRdv ?? existant.dateRdv;
       const nouvelleHeure = (data.heureDebut as string) ?? existant.heureDebut;
       const nouvelleDuree =
         (data.dureeMinutes as number) ?? existant.dureeMinutes;
-      const nouvelleFin = (data.heureFin as string) ?? existant.heureFin;
       const conflit = await this.trouverConflitRdv(
         nouvelleDate,
         nouvelleHeure,
         nouvelleDuree,
         id,
-        nouvelleFin,
       );
       if (conflit) throw new BadRequestException('Créneau déjà occupé');
     }
@@ -293,41 +264,15 @@ export class RdvsController {
     return this.userLookup.attachPrescripteurInfo(avecPatient);
   }
 
-  // Délègue à DemandesService.realiserDemande quand le RDV est lié à une
-  // demande : cette méthode met à jour RDV + demande dans une même
-  // transaction et envoie la notification "à interpréter" — la dupliquer
-  // ici avait justement produit le bug historique où le RDV passait à
-  // REALISE sans jamais faire avancer la demande (voir le commentaire dans
-  // demandes.service.ts::realiserDemande).
   @Roles('TECHNICIEN', 'CHEF_SERVICE')
   @Patch(':id/realiser')
-  async realiserRdv(
-    @Param('id') id: string,
-    @Body() body: RealiserRdvDto,
-    @Request() req: AuthenticatedRequest,
-    @BearerToken() token?: string,
-  ) {
-    const rdv = await this.prisma.eegRdv.findUnique({ where: { id } });
-    if (!rdv) throw new NotFoundException(`RDV ${id} introuvable`);
-
-    const technicienId = body.technicienId ?? req.user!.id;
-
-    if (rdv.demandeId) {
-      await this.demandesService.realiserDemande(
-        rdv.demandeId,
-        technicienId,
-        req.user!.role,
-        token,
-      );
-      return this.prisma.eegRdv.findUnique({ where: { id } });
-    }
-
+  async realiserRdv(@Param('id') id: string, @Body() body: RealiserRdvDto) {
     return this.prisma.eegRdv.update({
       where: { id },
       data: {
         statut: StatutRdv.REALISE,
         dateRealisation: new Date(),
-        technicienRealisateurId: technicienId,
+        technicienRealisateurId: body.technicienId ?? null,
       },
     });
   }

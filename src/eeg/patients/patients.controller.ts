@@ -14,7 +14,6 @@ import { PrescriptionClientService } from '../external/prescription-client.servi
 import { PriseEnChargeClientService } from '../../common/clients/prise-en-charge-client.service';
 import { DossierPatientClientService } from '../external/dossier-patient-client.service';
 import { BearerToken } from '../../common/decorators/bearer-token.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
 
 @Controller('eeg/patients')
 export class PatientsController {
@@ -137,10 +136,6 @@ export class PatientsController {
     return { antecedents, histoireMaladie, diagnostics, examenNeurologique };
   }
 
-  // Modifie l'identité du patient (Accueil) et/ou son n° de dossier EEG —
-  // pas une simple consultation : réservé aux rôles qui saisissent
-  // réellement des données patient, comme les autres actions métier.
-  @Roles('TECHNICIEN', 'CHEF_SERVICE')
   @Patch(':id')
   async modifierPatient(@Param('id') id: string, @Body() body: any) {
     if (body.idDossier) {

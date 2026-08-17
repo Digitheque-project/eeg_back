@@ -52,7 +52,6 @@ export class NotificationExternalService {
   private mapToNotifyServiceDto(dto: any) {
     const typeTitleMap: Record<string, string> = {
       RESULTAT_DISPONIBLE: 'Nouveau résultat EEG disponible',
-      RESULTAT_CRITIQUE: 'Résultat EEG CRITIQUE — action requise',
       DEMANDE_CREEE: 'Nouvelle demande EEG',
       DEMANDE_VALIDEE: 'Demande EEG validée',
       DEMANDE_REJETEE: 'Demande EEG rejetée',

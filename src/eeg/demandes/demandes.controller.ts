@@ -52,16 +52,9 @@ export class DemandesController {
   annulerDemande(
     @Param('id') id: string,
     @Body('motif') motif: string,
-    @Request() req: AuthenticatedRequest,
     @BearerToken() token?: string,
   ) {
-    return this.demandesService.annulerDemande(
-      id,
-      motif,
-      req.user!.id,
-      req.user!.role,
-      token,
-    );
+    return this.demandesService.annulerDemande(id, motif, token);
   }
 
   // Statut requis de la demande avant action : CREEE (vérifié dans le service)
@@ -78,13 +71,7 @@ export class DemandesController {
     @BearerToken() token?: string,
   ) {
     const technicienId = req.user!.id;
-    return this.demandesService.refuserDemande(
-      id,
-      motif,
-      technicienId,
-      req.user!.role,
-      token,
-    );
+    return this.demandesService.refuserDemande(id, motif, technicienId, token);
   }
 
   // Statut requis de la demande avant action : CREEE (vérifié dans le service)
@@ -100,13 +87,7 @@ export class DemandesController {
     @BearerToken() token?: string,
   ) {
     const technicienId = req.user!.id;
-    return this.demandesService.planifierRdv(
-      id,
-      dto,
-      technicienId,
-      req.user!.role,
-      token,
-    );
+    return this.demandesService.planifierRdv(id, dto, technicienId, token);
   }
 
   // Statut requis : CREEE avec urgence STAT (prise en charge immédiate) ou
@@ -125,12 +106,7 @@ export class DemandesController {
     @BearerToken() token?: string,
   ) {
     const technicienId = req.user!.id;
-    return this.demandesService.realiserDemande(
-      id,
-      technicienId,
-      req.user!.role,
-      token,
-    );
+    return this.demandesService.realiserDemande(id, technicienId, token);
   }
 
   // Statut requis de la demande avant action : EN_COURS (vérifié dans le service)
@@ -146,11 +122,6 @@ export class DemandesController {
     @Request() req: AuthenticatedRequest,
   ) {
     const chefId = req.user!.id;
-    return this.demandesService.archiverResultat(
-      id,
-      compteRendu,
-      chefId,
-      req.user!.role,
-    );
+    return this.demandesService.archiverResultat(id, compteRendu, chefId);
   }
 }
