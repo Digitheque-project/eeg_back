@@ -52,24 +52,21 @@ export class ArchivesController {
     const limitNum = Math.min(100, Math.max(1, parseInt(limit ?? '20', 10)));
     const skip = (pageNum - 1) * limitNum;
 
-    const filtreDemande: Prisma.EegDemandeWhereInput = {};
-    if (patientId) filtreDemande.patientId = patientId;
-    if (numeroEEG) filtreDemande.numeroEEG = { contains: numeroEEG };
-
-    const where: Prisma.EegResultatWhereInput = {
+    const where: any = {
       estImmutable: true,
-      demande: filtreDemande,
+      demande: {},
     };
 
+    if (patientId) where.demande.patientId = patientId;
+    if (numeroEEG) where.demande.numeroEEG = { contains: numeroEEG };
     if (dateDebut || dateFin) {
-      const filtreDate: Prisma.DateTimeNullableFilter = {};
-      if (dateDebut) filtreDate.gte = new Date(dateDebut);
+      where.dateValidation = {};
+      if (dateDebut) where.dateValidation.gte = new Date(dateDebut);
       if (dateFin) {
         const fin = new Date(dateFin);
         fin.setHours(23, 59, 59, 999);
-        filtreDate.lte = fin;
+        where.dateValidation.lte = fin;
       }
-      where.dateValidation = filtreDate;
     }
     if (conclusion) {
       where.conclusion = { contains: conclusion };
@@ -89,29 +86,6 @@ export class ArchivesController {
               dateCreation: true,
               patientId: true,
               prescripteurId: true,
-              // Champs nécessaires au compte rendu officiel CHUA généré
-              // côté front : date/heure de réalisation, motif, snapshot
-              // clinique de la prescription et prescripteur externe.
-              dateRealisation: true,
-              dateRDV: true,
-              dateValidation: true,
-              motifPrescription: true,
-              aeActuel: true,
-              agePremiereCrise: true,
-              dpm: true,
-              typeCrise: true,
-              dateDerniereCrise: true,
-              prescripteurExterneNom: true,
-              prescripteurExternePrenom: true,
-              prescripteurExterne: true,
-              rdv: {
-                select: {
-                  heureDebut: true,
-                  heureFin: true,
-                  renseignementClinique: true,
-                  dateRdv: true,
-                },
-              },
             },
           },
           rectifications: {
@@ -133,29 +107,10 @@ export class ArchivesController {
           this.userLookup.getUserInfo(r.demande.prescripteurId),
           this.userLookup.getUserInfo(r.medecinValidateurId),
         ]);
-        // Le générateur de compte rendu (eeg_front) lit ces clés à la RACINE
-        // du résultat, en plus de `demande.patient.*` : on les y expose donc
-        // aussi. Aucun champ existant n'est renommé — uniquement des ajouts.
-        const renseignementClinique =
-          r.demande.rdv?.renseignementClinique ??
-          r.demande.motifPrescription ??
-          null;
         return {
           ...r,
-          adresse: patient.adresse,
-          contact: patient.contact,
-          renseignementClinique,
-          dateRealisation: r.demande.dateRealisation,
-          dateExamen: r.demande.dateRealisation ?? r.demande.dateRDV,
-          heuresExamen: r.demande.rdv?.heureDebut ?? null,
           medecinValidateur,
-          demande: {
-            ...r.demande,
-            patient,
-            prescripteur,
-            adresse: patient.adresse,
-            contact: patient.contact,
-          },
+          demande: { ...r.demande, patient, prescripteur },
         };
       }),
     );
@@ -222,10 +177,8 @@ export class ArchivesController {
       }),
     ]);
 
-    const avecPatient =
-      await this.patientLookup.attachPatientInfoToMany(demandes);
-    const data =
-      await this.userLookup.attachPrescripteurInfoToMany(avecPatient);
+    const avecPatient = await this.patientLookup.attachPatientInfoToMany(demandes);
+    const data = await this.userLookup.attachPrescripteurInfoToMany(avecPatient);
 
     return {
       data,

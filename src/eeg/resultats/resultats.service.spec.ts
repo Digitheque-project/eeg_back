@@ -12,7 +12,6 @@ describe('ResultatsService', () => {
   const mockPrisma = {
     eegDemande: { findUnique: jest.fn() },
     eegResultat: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
-    eegRectification: { create: jest.fn() },
   };
 
   const mockUploadClient = {
@@ -120,97 +119,6 @@ describe('ResultatsService', () => {
         NotFoundException,
       );
       expect(uploadClient.getFile).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('rectifierResultat', () => {
-    const resultatImmuable = {
-      id: 'res-001',
-      demandeId: 'dem-001',
-      estImmutable: true,
-      version: 1,
-      conclusion: 'Tracé normal',
-      etatEveil: 'veille',
-      conditions: null,
-      noteComplementaireConclusion: null,
-      noteComplementaireConduite: null,
-    };
-
-    it('should reject a résultat that is not yet immuable', async () => {
-      prisma.eegResultat.findUnique.mockResolvedValue({
-        ...resultatImmuable,
-        estImmutable: false,
-      });
-
-      await expect(
-        service.rectifierResultat('res-001', { motif: 'Erreur' } as any, 'chef-001'),
-      ).rejects.toThrow(BadRequestException);
-      expect(prisma.eegRectification.create).not.toHaveBeenCalled();
-    });
-
-    // Les rubriques du compte rendu officiel CHUA doivent être corrigeables
-    // comme le reste du document, avec la même trace avant/après.
-    it('should rectify etatEveil, conditions and both notes complémentaires', async () => {
-      prisma.eegResultat.findUnique.mockResolvedValue(resultatImmuable);
-      prisma.eegRectification.create.mockResolvedValue({});
-      prisma.eegResultat.update.mockResolvedValue({});
-
-      await service.rectifierResultat(
-        'res-001',
-        {
-          motif: 'État d’éveil erroné',
-          etatEveil: 'sommeil',
-          conditions: 'Patient endormi, artéfacts de mouvement',
-          noteComplementaireConclusion: 'Contrôle à 3 mois',
-          noteComplementaireConduite: 'Adapter la posologie',
-        } as any,
-        'chef-001',
-      );
-
-      expect(prisma.eegRectification.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            resultatId: 'res-001',
-            auteurId: 'chef-001',
-            ancienneVersion: expect.objectContaining({ etatEveil: 'veille' }),
-            nouvelleVersion: expect.objectContaining({
-              etatEveil: 'sommeil',
-              conditions: 'Patient endormi, artéfacts de mouvement',
-              noteComplementaireConclusion: 'Contrôle à 3 mois',
-              noteComplementaireConduite: 'Adapter la posologie',
-            }),
-          }),
-        }),
-      );
-      expect(prisma.eegResultat.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 'res-001' },
-          data: expect.objectContaining({
-            version: 2,
-            etatEveil: 'sommeil',
-            conditions: 'Patient endormi, artéfacts de mouvement',
-            noteComplementaireConclusion: 'Contrôle à 3 mois',
-            noteComplementaireConduite: 'Adapter la posologie',
-          }),
-        }),
-      );
-    });
-
-    it('should only touch the fields actually provided', async () => {
-      prisma.eegResultat.findUnique.mockResolvedValue(resultatImmuable);
-      prisma.eegRectification.create.mockResolvedValue({});
-      prisma.eegResultat.update.mockResolvedValue({});
-
-      await service.rectifierResultat(
-        'res-001',
-        { motif: 'Coquille', conclusion: 'Tracé normal pour l’âge' } as any,
-        'chef-001',
-      );
-
-      const data = prisma.eegResultat.update.mock.calls[0][0].data;
-      expect(data.conclusion).toBe('Tracé normal pour l’âge');
-      expect(data).not.toHaveProperty('etatEveil');
-      expect(data).not.toHaveProperty('conditions');
     });
   });
 });

@@ -385,35 +385,6 @@ export class DemandesService {
     return { toutes: await this.userLookup.attachPrescripteurInfoToMany(avecPatient) };
   }
 
-  // ─── Champs dérivés pour le compte rendu officiel CHUA ─────────────
-  // Le générateur de compte rendu (eeg_front) lit ces clés à la RACINE de
-  // la demande. Elles ne sont pas stockées : ce sont des raccourcis vers
-  // des données déjà présentes (RDV, motif de prescription), calculés ici
-  // pour que le front n'ait pas à connaître les règles de repli.
-  private attacherChampsCompteRendu<
-    T extends {
-      motifPrescription?: string | null;
-      dateRealisation?: Date | null;
-      dateRDV?: Date | null;
-      rdv?: {
-        heureDebut?: string | null;
-        renseignementClinique?: string | null;
-      } | null;
-    },
-  >(demande: T) {
-    return {
-      ...demande,
-      // Le renseignement clinique saisi à la planification prime sur le
-      // motif d'origine de la prescription (il est plus récent/précis).
-      renseignementClinique:
-        demande.rdv?.renseignementClinique ?? demande.motifPrescription ?? null,
-      // Replis pour la date/heure d'examen imprimées sur le document
-      // quand la réalisation n'a pas encore été horodatée.
-      dateExamen: demande.dateRealisation ?? demande.dateRDV ?? null,
-      heuresExamen: demande.rdv?.heureDebut ?? null,
-    };
-  }
-
   // ─── Détail d'une demande ─────────────────────────────────────────
   async getDemandeById(id: string, token?: string) {
     const local = await this.prisma.eegDemande.findFirst({
@@ -422,12 +393,8 @@ export class DemandesService {
     });
     if (local) {
       const [avecHeure] = await this.attachHeureArrivee([local]);
-      // attachPatientInfo pose aussi `adresse` / `contact` à la racine,
-      // là où le générateur de compte rendu les lit.
       const avecPatient = await this.patientLookup.attachPatientInfo(avecHeure);
-      const avecPrescripteur =
-        await this.userLookup.attachPrescripteurInfo(avecPatient);
-      return this.attacherChampsCompteRendu(avecPrescripteur);
+      return this.userLookup.attachPrescripteurInfo(avecPatient);
     }
 
     const demande =
@@ -436,9 +403,7 @@ export class DemandesService {
     const avecPatient = await this.patientLookup.attachPatientInfo(
       this.buildVirtualDemande(demande),
     );
-    const avecPrescripteur =
-      await this.userLookup.attachPrescripteurInfo(avecPatient);
-    return this.attacherChampsCompteRendu(avecPrescripteur);
+    return this.userLookup.attachPrescripteurInfo(avecPatient);
   }
 
   async getDemandesByPatient(patientId: string) {
@@ -667,15 +632,6 @@ export class DemandesService {
       testActivationSli: compteRendu.testActivationSli ?? null,
       conclusion: compteRendu.conclusion ?? null,
       conduiteATenir: compteRendu.conduiteATenir ?? null,
-      // Rubriques du compte rendu officiel CHUA (état d'éveil, conditions
-      // d'examen, notes complémentaires) — le générateur PDF côté front les
-      // lit sur le résultat et affiche « Néant » quand elles sont nulles.
-      etatEveil: compteRendu.etatEveil ?? null,
-      conditions: compteRendu.conditions ?? null,
-      noteComplementaireConclusion:
-        compteRendu.noteComplementaireConclusion ?? null,
-      noteComplementaireConduite:
-        compteRendu.noteComplementaireConduite ?? null,
       estCritique: compteRendu.estCritique ?? false,
       estImmutable: true,
       dateValidation: new Date(),

@@ -24,9 +24,7 @@ async function bootstrap() {
   const corsOrigin = process.env.CORS_ORIGIN || '*';
   app.enableCors({
     origin: corsOrigin,
-    // PUT nécessaire depuis l'ajout de PUT /eeg/config/personnel-service ;
-    // OPTIONS pour le preflight des requêtes avec Authorization.
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PATCH', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
 

@@ -24,16 +24,6 @@ export interface NormalizedPatient {
   age: number | null;
   sexe: 'M' | 'F' | null;
   priseEnChargeId: string | null;
-  /**
-   * Adresse du patient telle que fournie par Accueil (clé variable selon le
-   * déploiement : adresse / address / adresseComplete...). null si absente.
-   */
-  adresse: string | null;
-  /**
-   * Coordonnée téléphonique du patient (phone / telephone / contact / tel).
-   * null si absente. Nécessaire au compte rendu officiel CHUA.
-   */
-  contact: string | null;
 }
 
 export interface UpdatePatientPayload {
@@ -69,24 +59,6 @@ export class AccueilClientService {
     return age;
   }
 
-  /**
-   * Première valeur texte non vide parmi une liste de clés candidates du DTO
-   * brut Accueil. Le nom exact du champ varie selon les déploiements
-   * (adresse / address / adresseComplete, phone / telephone / contact / tel) :
-   * on ne veut ni le coder en dur, ni échouer s'il est absent.
-   */
-  private premiereValeurTexte(
-    raw: AccueilPatientDto,
-    cles: string[],
-  ): string | null {
-    for (const cle of cles) {
-      const valeur: unknown = raw[cle];
-      if (typeof valeur === 'string' && valeur.trim()) return valeur.trim();
-      if (typeof valeur === 'number') return String(valeur);
-    }
-    return null;
-  }
-
   private normalize(raw: AccueilPatientDto): NormalizedPatient {
     return {
       id: raw.id,
@@ -94,25 +66,7 @@ export class AccueilClientService {
       prenom: raw.prenom ?? '',
       age: this.calculateAge(raw.dateNaissance),
       sexe: raw.sexe === 'MALE' ? 'M' : raw.sexe === 'FEMALE' ? 'F' : null,
-      priseEnChargeId:
-        typeof raw.priseEnChargeId === 'string' ? raw.priseEnChargeId : null,
-      // Adresse / contact : demandés par le compte rendu officiel CHUA,
-      // jusqu'ici perdus à la normalisation (le front affichait « Néant »).
-      adresse: this.premiereValeurTexte(raw, [
-        'adresse',
-        'address',
-        'adresseComplete',
-        'adresse_complete',
-        'domicile',
-      ]),
-      contact: this.premiereValeurTexte(raw, [
-        'contact',
-        'telephone',
-        'phone',
-        'tel',
-        'numeroTelephone',
-        'telephone1',
-      ]),
+      priseEnChargeId: (raw as any).priseEnChargeId ?? null,
     };
   }
 
