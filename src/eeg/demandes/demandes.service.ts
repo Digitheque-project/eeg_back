@@ -234,19 +234,28 @@ export class DemandesService {
         this.logger.log(
           `🔔 Notification locale pour ${demande.numeroEEG} (typeEEG: ${demande.typeEEG})`,
         );
-        await this.prisma.eegNotification.create({
-          data: {
-            niveau: demande.urgence,
-            type: 'NOUVELLE_DEMANDE',
-            titre: 'Nouvelle demande EEG',
-            message: `${demande.numeroEEG} — ${demande.typeEEG}`,
-            patientId: demande.patientId,
-            demandeId: demande.id,
-            // Concerne le TECHNICIEN (à lui de planifier/réaliser) — pas le
-            // CHEF_SERVICE, qui n'agit qu'une fois l'examen réalisé.
-            roleCible: 'TECHNICIEN',
-          },
-        });
+        // La demande est déjà promue (commit séparé, ci-dessus) : un échec
+        // ici ne doit ni la faire disparaître ni faire échouer getWorklist
+        // pour tout le monde — juste être journalisé.
+        try {
+          await this.prisma.eegNotification.create({
+            data: {
+              niveau: demande.urgence,
+              type: 'NOUVELLE_DEMANDE',
+              titre: 'Nouvelle demande EEG',
+              message: `${demande.numeroEEG} — ${demande.typeEEG}`,
+              patientId: demande.patientId,
+              demandeId: demande.id,
+              // Concerne le TECHNICIEN (à lui de planifier/réaliser) — pas le
+              // CHEF_SERVICE, qui n'agit qu'une fois l'examen réalisé.
+              roleCible: 'TECHNICIEN',
+            },
+          });
+        } catch (error) {
+          this.logger.error(
+            `Échec création notification NOUVELLE_DEMANDE pour ${demande.numeroEEG}: ${getErrorMessage(error)}`,
+          );
+        }
       }
     } finally {
       nouvelles.forEach((d) => this.demandesEnCoursDePromotion.delete(d.id));
@@ -304,6 +313,21 @@ export class DemandesService {
     technicienId?: string,
   ) {
     return this.prisma.$transaction(async (tx) => {
+      const avant = await tx.eegDemande.findUnique({
+        where: { id },
+        include: { rdv: true },
+      });
+      // Un RDV déjà REALISE porte un examen réellement effectué (tracé
+      // éventuellement uploadé) : l'écraser en ANNULE orphelinerait ce
+      // résultat, qui ne redeviendrait jamais archivable (archiverResultat
+      // exige EN_COURS). Cohérent avec rdvs.controller.ts qui interdit déjà
+      // d'annuler/modifier un RDV REALISE via ses propres endpoints.
+      if (avant?.rdv?.statut === 'REALISE') {
+        throw new BadRequestException(
+          "Impossible d'annuler cette demande : le rendez-vous associé est déjà réalisé",
+        );
+      }
+
       const demande = await tx.eegDemande.update({
         where: { id },
         data: {
@@ -691,18 +715,26 @@ export class DemandesService {
 
     // Notification interactive du transfert TECHNICIEN -> CHEF_SERVICE :
     // sans ça, seule l'alerte "non interprété depuis 24h" (cron) existait,
-    // bien trop tardive pour un examen qui vient d'être réalisé.
-    await this.prisma.eegNotification.create({
-      data: {
-        niveau: demandeMaj.urgence,
-        type: 'A_INTERPRETER',
-        titre: 'Examen à interpréter',
-        message: `${demandeMaj.numeroEEG} — examen réalisé, prêt à interpréter`,
-        patientId: demandeMaj.patientId,
-        demandeId: demandeMaj.id,
-        roleCible: 'CHEF_SERVICE',
-      },
-    });
+    // bien trop tardive pour un examen qui vient d'être réalisé. La
+    // transition principale (demande + RDV) est déjà commitée ci-dessus :
+    // un échec ici est journalisé, pas remonté en erreur au client.
+    try {
+      await this.prisma.eegNotification.create({
+        data: {
+          niveau: demandeMaj.urgence,
+          type: 'A_INTERPRETER',
+          titre: 'Examen à interpréter',
+          message: `${demandeMaj.numeroEEG} — examen réalisé, prêt à interpréter`,
+          patientId: demandeMaj.patientId,
+          demandeId: demandeMaj.id,
+          roleCible: 'CHEF_SERVICE',
+        },
+      });
+    } catch (error) {
+      this.logger.error(
+        `Échec création notification A_INTERPRETER pour ${demandeMaj.numeroEEG}: ${getErrorMessage(error)}`,
+      );
+    }
 
     await this.auditService.log({
       utilisateurId: techId,
@@ -805,19 +837,25 @@ export class DemandesService {
     // n'avait aucune conséquence de notification, seulement lu passivement
     // dans /eeg/rapports/anomalies.
     if (estCritique) {
-      await this.prisma.eegNotification.create({
-        data: {
-          niveau: d.urgence,
-          type: 'ALERTE_CRITIQUE',
-          titre: 'Résultat EEG critique',
-          message: `${demandeMaj.numeroEEG} — résultat critique disponible, à prendre en compte immédiatement`,
-          patientId: demandeMaj.patientId,
-          demandeId: demandeMaj.id,
-          // Visible par tout le service (pas de rôle EEG "prescripteur") —
-          // l'alerte externe ci-dessous relaie vers le prescripteur.
-          roleCible: null,
-        },
-      });
+      try {
+        await this.prisma.eegNotification.create({
+          data: {
+            niveau: d.urgence,
+            type: 'ALERTE_CRITIQUE',
+            titre: 'Résultat EEG critique',
+            message: `${demandeMaj.numeroEEG} — résultat critique disponible, à prendre en compte immédiatement`,
+            patientId: demandeMaj.patientId,
+            demandeId: demandeMaj.id,
+            // Visible par tout le service (pas de rôle EEG "prescripteur") —
+            // l'alerte externe ci-dessous relaie vers le prescripteur.
+            roleCible: null,
+          },
+        });
+      } catch (error) {
+        this.logger.error(
+          `Échec création notification ALERTE_CRITIQUE pour ${demandeMaj.numeroEEG}: ${getErrorMessage(error)}`,
+        );
+      }
     }
 
     this.notificationService

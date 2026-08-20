@@ -80,12 +80,18 @@ export class ResultatsService {
       });
     }
 
+    // medecinValidateurId n'est PAS renseigné ici : à ce stade, seul le
+    // tracé a été uploadé par un TECHNICIEN, aucune validation médicale n'a
+    // eu lieu (estImmutable reste false). Il est toujours écrasé par
+    // archiverResultat (medecinValidateurId: chefId) — le laisser vide
+    // jusque-là évite d'afficher le technicien comme "médecin validateur"
+    // d'un résultat encore en brouillon si la demande était annulée avant
+    // archivage.
     return this.prisma.eegResultat.create({
       data: {
         demandeId,
         fichierImagePath: uploaded.filename,
         nomFichierImage: fichier.originalname,
-        medecinValidateurId: technicienId,
       },
     });
   }
@@ -118,7 +124,7 @@ export class ResultatsService {
   ) {
     const resultat = await this.prisma.eegResultat.findUnique({
       where: { id: resultatId },
-      include: { demande: { select: { patientId: true } } },
+      include: { demande: { select: { patientId: true, numeroEEG: true } } },
     });
     if (!resultat) {
       throw new NotFoundException(`Résultat ${resultatId} introuvable`);
@@ -194,6 +200,22 @@ export class ResultatsService {
       patientId: resultat.demande.patientId,
       demandeId: resultat.demandeId,
       detail: { type: 'rectification', motif: dto.motif, champs: Object.keys(nouvelleVersion) },
+    });
+
+    // Un compte rendu déjà validé (donc potentiellement déjà consulté) vient
+    // d'être corrigé — contrairement à l'archivage initial, rien ne
+    // signalait ce changement jusqu'ici. Visible par tout le service EEG
+    // (roleCible null), comme l'alerte résultat critique.
+    await this.prisma.eegNotification.create({
+      data: {
+        niveau: 'NORMALE',
+        type: 'SYSTEME',
+        titre: 'Compte rendu rectifié',
+        message: `${resultat.demande.numeroEEG} — compte rendu corrigé (motif : ${dto.motif})`,
+        patientId: resultat.demande.patientId,
+        demandeId: resultat.demandeId,
+        roleCible: null,
+      },
     });
 
     return resultatMaj;

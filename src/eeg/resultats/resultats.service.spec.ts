@@ -14,6 +14,7 @@ describe('ResultatsService', () => {
     eegDemande: { findUnique: jest.fn() },
     eegResultat: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
     eegRectification: { create: jest.fn() },
+    eegNotification: { create: jest.fn() },
   };
 
   const mockUploadClient = {

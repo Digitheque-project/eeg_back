@@ -203,20 +203,51 @@ export class RdvsController {
       body.heureFin,
     );
     if (conflit) throw new BadRequestException('Créneau déjà occupé');
-    const rdv = await this.prisma.eegRdv.create({
-      data: {
-        patientId: body.patientId,
-        prescripteurId: body.prescripteurId,
-        demandeId: body.demandeId ?? null,
-        typeEEG: body.typeEEG,
-        priorite: body.priorite,
-        dateRdv,
-        heureDebut: body.heureDebut,
-        heureFin: heureFinCalculee,
-        dureeMinutes,
-        renseignementClinique: body.renseignementClinique ?? null,
-      },
-    });
+
+    // Si le RDV est lié à une demande, la faire passer à PLANIFIEE dans la
+    // même transaction que la création du RDV — sinon la demande reste
+    // CREEE alors qu'un RDV existe déjà pour elle : le flux normal
+    // (demandes.controller.ts:planifierRdv, qui exige statut === 'CREEE')
+    // tente alors de créer un second RDV et échoue sur la contrainte
+    // unique EegRdv.demandeId.
+    if (body.demandeId) {
+      const demande = await this.prisma.eegDemande.findUnique({
+        where: { id: body.demandeId },
+      });
+      if (!demande) {
+        throw new BadRequestException(`Demande ${body.demandeId} introuvable`);
+      }
+      if (demande.statut !== 'CREEE') {
+        throw new BadRequestException(
+          `Statut invalide pour planifier cette demande: ${demande.statut}`,
+        );
+      }
+    }
+
+    const [rdv] = await this.prisma.$transaction([
+      this.prisma.eegRdv.create({
+        data: {
+          patientId: body.patientId,
+          prescripteurId: body.prescripteurId,
+          demandeId: body.demandeId ?? null,
+          typeEEG: body.typeEEG,
+          priorite: body.priorite,
+          dateRdv,
+          heureDebut: body.heureDebut,
+          heureFin: heureFinCalculee,
+          dureeMinutes,
+          renseignementClinique: body.renseignementClinique ?? null,
+        },
+      }),
+      ...(body.demandeId
+        ? [
+            this.prisma.eegDemande.update({
+              where: { id: body.demandeId },
+              data: { statut: 'PLANIFIEE' as const, dateRDV: dateRdv },
+            }),
+          ]
+        : []),
+    ]);
     const avecPatient = await this.patientLookup.attachPatientInfo(rdv);
     return this.userLookup.attachPrescripteurInfo(avecPatient);
   }
@@ -260,7 +291,6 @@ export class RdvsController {
         );
       }
     }
-    if (body.statut) data.statut = body.statut;
     if (body.renseignementClinique !== undefined)
       data.renseignementClinique = body.renseignementClinique;
 

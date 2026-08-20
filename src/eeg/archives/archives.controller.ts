@@ -4,7 +4,13 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PatientLookupService } from '../patients/patient-lookup.service';
 import { UserLookupService } from '../../common/clients/user-lookup.service';
+import { Roles } from '../../common/decorators/roles.decorator';
 
+// Contient des données cliniques (conclusions, interprétations) : réservé
+// aux 3 rôles EEG, comme le reste du module — sans ce garde, n'importe quel
+// rôle authentifié (même hors service EEG) pouvait parcourir tous les
+// résultats archivés par simple appel API direct.
+@Roles('TECHNICIEN', 'CHEF_SERVICE', 'MAJOR_SERVICE')
 @ApiTags('Archives')
 @Controller('eeg/archives')
 export class ArchivesController {

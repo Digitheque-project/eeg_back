@@ -100,7 +100,11 @@ export class EegSchedulerService implements OnModuleInit {
     const statEnAttente = await this.prisma.eegDemande.findMany({
       where: {
         urgence: 'STAT',
-        statut: 'CREEE',
+        // PLANIFIEE inclus : rien n'empêche de planifier (plutôt que
+        // réaliser immédiatement) une demande STAT — sans ça, une fois
+        // planifiée elle sortait définitivement du radar de cette alerte
+        // même si le RDV n'était jamais honoré.
+        statut: { in: ['CREEE', 'PLANIFIEE'] },
         dateCreation: { lte: il_y_a_30min },
       },
     });
