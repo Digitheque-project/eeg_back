@@ -16,7 +16,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { StatutRdv } from '@prisma/client';
 import { PatientLookupService } from '../patients/patient-lookup.service';
 import { UserLookupService } from '../../common/clients/user-lookup.service';
-import { estWeekend, ajouterMinutes } from '../../common/utils/date.util';
+import { ajouterMinutes } from '../../common/utils/date.util';
 import { CreateRdvDto } from './dto/create-rdv.dto';
 import { ModifierRdvDto } from './dto/modifier-rdv.dto';
 import { RealiserRdvDto } from './dto/realiser-rdv.dto';
@@ -183,11 +183,6 @@ export class RdvsController {
   @Post()
   async creerRdv(@Body() body: CreateRdvDto) {
     const dateRdv = new Date(body.dateRdv);
-    if (estWeekend(dateRdv)) {
-      throw new BadRequestException(
-        'Impossible de planifier un RDV le week-end',
-      );
-    }
     const dureeMinutes = body.dureeMinutes ?? 60;
     const heureFinCalculee = body.heureFin ?? ajouterMinutes(body.heureDebut, dureeMinutes);
     if (heureFinCalculee <= body.heureDebut) {
@@ -265,13 +260,7 @@ export class RdvsController {
 
     const data: Partial<ModifierRdvDto & { dateRdv: Date }> = {};
     if (body.dateRdv) {
-      const dateRdv = new Date(body.dateRdv);
-      if (estWeekend(dateRdv)) {
-        throw new BadRequestException(
-          'Impossible de planifier un RDV le week-end',
-        );
-      }
-      data.dateRdv = dateRdv as any;
+      data.dateRdv = new Date(body.dateRdv) as any;
     }
     if (body.heureDebut) data.heureDebut = body.heureDebut;
     if (body.dureeMinutes) data.dureeMinutes = body.dureeMinutes;

@@ -1,9 +1,3 @@
-/** Un RDV EEG ne peut jamais être placé un samedi ou un dimanche. */
-export function estWeekend(date: Date): boolean {
-  const jour = date.getUTCDay();
-  return jour === 0 || jour === 6;
-}
-
 /** "08:30" + 90 → "10:00" */
 export function ajouterMinutes(
   heureDebut: string,

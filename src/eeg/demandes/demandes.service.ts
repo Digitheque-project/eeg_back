@@ -14,7 +14,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { PatientLookupService } from '../patients/patient-lookup.service';
 import { UserLookupService } from '../../common/clients/user-lookup.service';
 import { getErrorMessage } from '../../common/utils/error.util';
-import { estWeekend, ajouterMinutes } from '../../common/utils/date.util';
+import { ajouterMinutes } from '../../common/utils/date.util';
 import { PlanifierRdvDto } from './dto/planifier-rdv.dto';
 import { ArchiverResultatDto } from './dto/archiver-resultat.dto';
 import { externalServicesConfig } from '../../common/config/external-services.config';
@@ -576,11 +576,6 @@ export class DemandesService {
       throw new BadRequestException(`Statut invalide: ${d.statut}`);
 
     const dateRdv = new Date(dto.dateRDV);
-    if (estWeekend(dateRdv)) {
-      throw new BadRequestException(
-        'Impossible de planifier un RDV le week-end',
-      );
-    }
     const dureeMinutes = dto.dureeMinutes ?? 60;
     const heureFin = ajouterMinutes(dto.heureDebut, dureeMinutes);
     // ajouterMinutes boucle sur 24h (modulo) : un créneau qui dépasse
