@@ -101,12 +101,28 @@ export class JwtAuthGuard implements CanActivate {
     try {
       return jwt.verify(token, secret) as SsoTokenPayload;
     } catch (error) {
-      this.logger.warn(
-        `Signature JWT invalide ou expirée : ${
+      // ⚠️ TEMPORAIRE (bypass volontaire, ajouté le 2026-08-22 à la demande
+      // du client) : JWT_SECRET configuré sur Render ne correspond visiblement
+      // pas à la clé utilisée par auth-service pour signer les tokens — plus
+      // personne ne pouvait se connecter (rejet 401 sur 100% des tokens
+      // pourtant valides). En attendant que le bon secret soit confirmé et
+      // redéployé, on retombe sur un décodage non vérifié plutôt que de
+      // bloquer tout accès à l'application. Ça RÉOUVRE le trou de sécurité
+      // documenté ci-dessus (un token forgé à la main est accepté).
+      // À SUPPRIMER dès que JWT_SECRET est corrigé : ce log ERROR doit
+      // disparaître des logs Render une fois le secret aligné — c'est le
+      // signal que ce bypass peut être retiré.
+      this.logger.error(
+        `⚠️ BYPASS TEMPORAIRE — signature JWT rejetée (${
           error instanceof Error ? error.message : String(error)
-        }`,
+        }) mais token accepté quand même via décodage non vérifié. ` +
+          'Vérifier/corriger JWT_SECRET sur Render puis retirer ce bypass dans jwt-auth.guard.ts.',
       );
-      return null;
+      try {
+        return jwt.decode(token) as SsoTokenPayload | null;
+      } catch {
+        return null;
+      }
     }
   }
 
