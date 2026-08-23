@@ -111,6 +111,12 @@ model EegDemande {
   typeCrise         String?
   dateDerniereCrise String?
 
+  // Alertes et remarques libres saisies par le prescripteur — déjà
+  // renvoyées par prescription_back (PrescriptionEegRawDto) mais jamais
+  // conservées ici jusqu'ici. Affichées en lecture seule dans TabA_Prescription.
+  alertes   String?
+  remarques String?
+
   resultat      EegResultat?
   notifications EegNotification[]
   audits        EegAudit[]

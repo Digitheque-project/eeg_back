@@ -134,6 +134,8 @@ export class DemandesService {
       dpm: p.dpm ?? null,
       typeCrise: p.typeCrise ?? null,
       dateDerniereCrise: p.dateDerniereCrise ?? null,
+      alertes: p.alertes ?? null,
+      remarques: p.remarques ?? null,
     };
   }
 
@@ -182,6 +184,8 @@ export class DemandesService {
           dpm: p.dpm ?? null,
           typeCrise: p.typeCrise ?? null,
           dateDerniereCrise: p.dateDerniereCrise ?? null,
+          alertes: p.alertes ?? null,
+          remarques: p.remarques ?? null,
         },
         include: { rdv: true },
       });
