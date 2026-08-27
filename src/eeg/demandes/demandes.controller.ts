@@ -59,7 +59,7 @@ export class DemandesController {
       id,
       motif,
       req.user!.id,
-      req.user!.role,
+      req.user!.role!,
       token,
     );
   }
@@ -82,7 +82,7 @@ export class DemandesController {
       id,
       motif,
       technicienId,
-      req.user!.role,
+      req.user!.role!,
       token,
     );
   }
@@ -104,7 +104,7 @@ export class DemandesController {
       id,
       dto,
       technicienId,
-      req.user!.role,
+      req.user!.role!,
       token,
     );
   }
@@ -128,7 +128,7 @@ export class DemandesController {
     return this.demandesService.realiserDemande(
       id,
       technicienId,
-      req.user!.role,
+      req.user!.role!,
       token,
     );
   }
@@ -150,7 +150,7 @@ export class DemandesController {
       id,
       compteRendu,
       chefId,
-      req.user!.role,
+      req.user!.role!,
     );
   }
 }

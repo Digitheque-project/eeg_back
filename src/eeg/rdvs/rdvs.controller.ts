@@ -335,7 +335,7 @@ export class RdvsController {
       await this.demandesService.realiserDemande(
         rdv.demandeId,
         technicienId,
-        req.user!.role,
+        req.user!.role!,
         token,
       );
       return this.prisma.eegRdv.findUnique({ where: { id } });

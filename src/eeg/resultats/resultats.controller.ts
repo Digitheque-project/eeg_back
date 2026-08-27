@@ -99,7 +99,7 @@ export class ResultatsController {
       id,
       dto,
       auteurId,
-      req.user!.role,
+      req.user!.role!,
     );
   }
 }

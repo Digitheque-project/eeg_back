@@ -1,7 +1,6 @@
 import {
   CanActivate,
   ExecutionContext,
-  ForbiddenException,
   Injectable,
   Logger,
   UnauthorizedException,
@@ -62,20 +61,22 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     const serviceEntry = payload.services?.[0];
-    if (!serviceEntry) {
-      throw new ForbiddenException(
-        'Aucun service associé à cet utilisateur',
-      );
-    }
-
+    // Un token de service (compte-à-compte, ex. dossier-patient-back) est un
+    // JWT valide signé avec le même secret mais sans service associé. On
+    // l'authentifie quand même : c'est un couple service↔service légitime,
+    // pas un utilisateur final. Les routes à rôle restent fermées par
+    // RolesGuard (un token sans service n'a aucun rôle).
     request.user = {
       id: payload.userId,
       nom: payload.name,
       prenom: payload.firstname,
       email: payload.email,
-      serviceId: serviceEntry.serviceId,
-      role: serviceEntry.roleName,
-      permissions: serviceEntry.permissions ?? [],
+      serviceId: serviceEntry?.serviceId,
+      role: serviceEntry?.roleName,
+      permissions: serviceEntry?.permissions ?? [],
+      // Signale un appel service↔service : utile à RolesGuard pour laisser
+      // passer les lectures d'agrégation sans rôle associé.
+      isServiceAccount: !serviceEntry,
     };
     return true;
   }

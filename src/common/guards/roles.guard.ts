@@ -29,6 +29,19 @@ export class RolesGuard implements CanActivate {
     if (!rolesRequis || rolesRequis.length === 0) return true;
 
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
+    // Appel service↔service (token valide signé mais sans service associé) :
+    // il n'a par définition aucun rôle. On le laisse passer uniquement sur
+    // les LECTURES (GET) nécessaires à l'agrégation (archives, résultats,
+    // historique patient). Les demandes de mutation (PATCH/POST/DELETE)
+    // restent fermées : un token sans rôle ne peut pas les déclencher, et
+    // leurs handlers supposent `user.role` défini.
+    if (request.user?.isServiceAccount) {
+      if (request.method === 'GET') return true;
+      throw new ForbiddenException(
+        'Action réservée à un utilisateur avec rôle',
+      );
+    }
+
     const role = request.user?.role;
     if (!role || !rolesRequis.includes(role)) {
       throw new ForbiddenException(

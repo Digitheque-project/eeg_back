@@ -5,9 +5,10 @@ export interface SsoUser {
   nom: string;
   prenom: string;
   email: string;
-  serviceId: string;
-  role: string;
-  permissions: string[];
+  serviceId?: string;
+  role?: string;
+  permissions?: string[];
+  isServiceAccount?: boolean;
 }
 
 export interface AuthenticatedRequest extends Request {
