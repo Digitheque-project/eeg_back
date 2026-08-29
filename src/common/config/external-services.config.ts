@@ -65,7 +65,13 @@ export const externalServicesConfig = {
   userServiceUrl: gatewayPath('users'),
   internalApiKey: readEnv('INTERNAL_API_KEY'),
   prescriptionApiUrl: gatewayPath('prescriptions'),
-  notificationServiceUrl: gatewayPath('notification'),
+  // Le registre gateway proxifie ce service sous /notifications (pluriel,
+  // paths: ['/notifications', '/socket.io']), pas /notification — son champ
+  // `prefix` ('notification', singulier) ne sert qu'à la convention de doc
+  // (/notification/api/docs) et NE correspond PAS à son chemin réel. Comme
+  // le point d'appel (notification-external.service.ts) ajoute déjà lui-même
+  // /notifications, on garde ici l'origine brute de la gateway, sans suffixe.
+  notificationServiceUrl: GATEWAY_URL,
   uploadServiceUrl: gatewayPath('upload'),
   dossierPatientApiUrl: gatewayPath('dossier-patient'),
 
