@@ -398,7 +398,12 @@ export class DemandesService {
     }));
   }
 
-  async getWorklist(role: string, token?: string) {
+  async getWorklist(
+    role: string,
+    token?: string,
+    serviceId?: string,
+    chuId?: string,
+  ) {
     if (!['TECHNICIEN', 'CHEF_SERVICE', 'MAJOR_SERVICE'].includes(role)) {
       return { message: 'Rôle non reconnu' };
     }
@@ -407,7 +412,9 @@ export class DemandesService {
       this.prisma.eegDemande.findMany({
         select: { prescriptionSourceId: true },
       }),
-      this.prescriptionClient.listEegDemandes(undefined, undefined, token),
+      // serviceId/chuId du JWT de l'appelant si fournis, sinon repli sur la
+      // config déduite de PRESCRIPTION_API_TOKEN (voir listEegDemandes).
+      this.prescriptionClient.listEegDemandes(serviceId, chuId, token),
     ]);
 
     const sourceIdsConnus = new Set(

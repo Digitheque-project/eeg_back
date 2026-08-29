@@ -15,6 +15,7 @@ interface SsoServiceEntry {
   serviceId: string;
   roleName: string;
   permissions: string[];
+  chu?: { id: string };
 }
 
 interface SsoTokenPayload {
@@ -72,6 +73,7 @@ export class JwtAuthGuard implements CanActivate {
       prenom: payload.firstname,
       email: payload.email,
       serviceId: serviceEntry?.serviceId,
+      chuId: serviceEntry?.chu?.id,
       role: serviceEntry?.roleName,
       permissions: serviceEntry?.permissions ?? [],
       // Signale un appel service↔service : utile à RolesGuard pour laisser

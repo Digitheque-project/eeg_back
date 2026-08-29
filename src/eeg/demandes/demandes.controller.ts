@@ -30,7 +30,15 @@ export class DemandesController {
     // Le rôle du token JWT fait autorité : on ignore le paramètre query
     // `role` (qui était surchargeable par n'importe quel client).
     const role = req.user?.role ?? roleParam ?? '';
-    return this.demandesService.getWorklist(role, token);
+    // serviceId/chuId viennent du JWT de l'appelant, jamais d'une variable
+    // d'environnement — cohérent avec le service réellement affiché à
+    // l'écran de l'utilisateur connecté, pas une valeur figée au déploiement.
+    return this.demandesService.getWorklist(
+      role,
+      token,
+      req.user?.serviceId,
+      req.user?.chuId,
+    );
   }
 
   @Get('patient/:patientId')
