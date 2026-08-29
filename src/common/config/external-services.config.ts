@@ -8,12 +8,18 @@ import * as jwt from 'jsonwebtoken';
 // Notification, Dossier patient, Upload...) — seul le SUFFIXE de chemin
 // (propre à chaque service, cf. registre gateway) reste dans le code.
 //
-// De même, aucun id de CHU ni de service EEG n'est plus codé en variable
-// d'environnement : ces deux identités sont dérivées du JWT de l'appelant
-// (voir jwt-auth.guard.ts, qui les expose sur req.user.chuId/serviceId) pour
-// tout appel porté par une requête utilisateur. Les tâches de fond (cron,
-// sans requête utilisateur) restent une exception documentée : elles dérivent
-// la même info du PRESCRIPTION_API_TOKEN (dernier repli, service-service).
+// Aucun id de CHU ni de service EEG n'est plus utilisé en variable
+// d'environnement pour un appel porté par une requête utilisateur : ces deux
+// identités sont dérivées du JWT de l'appelant (voir jwt-auth.guard.ts, qui
+// les expose sur req.user.chuId/serviceId).
+//
+// SSO_EEG_SERVICE_ID / CHU_ID restent des variables ici, mais avec un rôle
+// différent : ce ne sont PAS des identités "empruntées" à un tiers pour
+// authentifier des appels, ce sont les constantes d'IDENTITÉ PROPRE de ce
+// déploiement (qui suis-je dans le registre multi-CHU/multi-service), au
+// même titre que PORT — nécessaires uniquement pour la tâche de fond sans
+// requête utilisateur (cron de synchronisation), qui n'a structurellement
+// aucun JWT d'où les extraire.
 //
 // Une valeur manquante n'empêche pas le démarrage (les clients HTTP sont déjà
 // tous défensifs — try/catch, ne throw jamais) mais est signalée bruyamment
@@ -32,47 +38,6 @@ function readEnv(name: string): string {
   return value ?? '';
 }
 
-function decodeServiceTokenField(field: 'serviceId' | 'chuId'): string {
-  const token = process.env.PRESCRIPTION_API_TOKEN;
-  if (!token) return '';
-  try {
-    const payload = jwt.decode(token) as Record<string, any> | null;
-    const entry = payload?.services?.[0];
-    const value = field === 'chuId' ? entry?.chu?.id : entry?.serviceId;
-    if (typeof value === 'string' && value) return value;
-  } catch {
-    /* ignore — repli sur '' ci-dessous */
-  }
-  return '';
-}
-
-// Repli UNIQUEMENT pour les tâches de fond sans requête utilisateur (cron de
-// synchronisation) : déduit du même PRESCRIPTION_API_TOKEN déjà nécessaire
-// pour authentifier ces appels service-service. Pour tout appel porté par une
-// requête utilisateur, préférer req.user.serviceId / req.user.chuId (JWT de
-// l'appelant), toujours plus à jour qu'un token statique.
-function deriveEegServiceId(): string {
-  const value = decodeServiceTokenField('serviceId');
-  if (!value) {
-    logger.warn(
-      'Impossible de déduire eegServiceId de PRESCRIPTION_API_TOKEN — les tâches de fond seront dégradées.',
-    );
-  } else {
-    logger.log(`eegServiceId (repli tâches de fond) déduit de PRESCRIPTION_API_TOKEN : ${value}`);
-  }
-  return value;
-}
-
-function deriveChuId(): string {
-  const value = decodeServiceTokenField('chuId');
-  if (!value) {
-    logger.warn(
-      'Impossible de déduire chuId de PRESCRIPTION_API_TOKEN — les tâches de fond seront dégradées.',
-    );
-  }
-  return value;
-}
-
 const GATEWAY_URL = readEnv('GATEWAY_URL').replace(/\/+$/, '');
 
 function gatewayPath(prefix: string): string {
@@ -81,15 +46,15 @@ function gatewayPath(prefix: string): string {
 
 export const externalServicesConfig = {
   // Secret HS256 partagé avec le service SSO externe — signe les JWT que
-  // JwtAuthGuard vérifie. Sans cette variable, le guard ne peut PAS
-  // vérifier la signature des tokens (voir jwt-auth.guard.ts).
+  // JwtAuthGuard vérifie, ET signe le token de service auto-généré
+  // ci-dessous (signServiceToken). DOIT être le même secret que celui qui
+  // signe réellement les JWT utilisateurs (vérifié en conditions réelles :
+  // secret123, partagé avec la gateway et les autres services).
   jwtSecret: readEnv('JWT_SECRET'),
 
-  // Repli tâches de fond UNIQUEMENT (cron) — voir commentaire ci-dessus.
-  // Un appel porté par une requête utilisateur doit utiliser
-  // req.user.chuId / req.user.serviceId, jamais ces valeurs.
-  chuId: deriveChuId(),
-  eegServiceId: deriveEegServiceId(),
+  // Identité propre de ce déploiement — voir commentaire en tête de fichier.
+  chuId: readEnv('CHU_ID'),
+  eegServiceId: readEnv('SSO_EEG_SERVICE_ID'),
 
   // Toutes les URLs directes ci-dessous passent désormais par la passerelle
   // unique — un seul GATEWAY_URL à configurer, plus aucune URL de service
@@ -100,7 +65,6 @@ export const externalServicesConfig = {
   userServiceUrl: gatewayPath('users'),
   internalApiKey: readEnv('INTERNAL_API_KEY'),
   prescriptionApiUrl: gatewayPath('prescriptions'),
-  prescriptionApiToken: process.env.PRESCRIPTION_API_TOKEN ?? '',
   notificationServiceUrl: gatewayPath('notification'),
   uploadServiceUrl: gatewayPath('upload'),
   dossierPatientApiUrl: gatewayPath('dossier-patient'),
@@ -110,3 +74,48 @@ export const externalServicesConfig = {
   // utilisateurs ne sont pas encore créés — voir DemandesService.resolvePrescripteurId.
   defaultChefServiceUserId: process.env.DEFAULT_CHEF_SERVICE_USER_ID ?? '',
 };
+
+/**
+ * Jeton de service auto-signé pour les appels sortants sans requête
+ * utilisateur (cron de synchronisation des prescriptions) — remplace un
+ * ancien jeton externe statique (PRESCRIPTION_API_TOKEN) qui expirait et
+ * devait être renouvelé manuellement. Signé à la volée avec le même secret
+ * que celui utilisé pour vérifier les JWT entrants (jwtSecret) : les
+ * services tiers (ex. prescription_back) qui font confiance à ce secret
+ * acceptent ce jeton comme n'importe quel JWT SSO légitime.
+ *
+ * Jamais stocké ni mis en cache : régénéré à chaque appel, donc jamais
+ * expiré en pratique (courte durée de vie volontaire — 5 min — pour limiter
+ * la fenêtre d'utilisation d'un jeton qui fuiterait).
+ *
+ * Ne throw jamais (cohérent avec le reste de ce fichier) : sans JWT_SECRET
+ * configuré, renvoie une chaîne vide plutôt que de faire planter l'appelant
+ * — l'appel HTTP échouera proprement (401) au lieu de ne jamais partir.
+ */
+export function signServiceToken(): string {
+  if (!externalServicesConfig.jwtSecret) {
+    logger.warn(
+      'JWT_SECRET non défini — impossible de signer un jeton de service, les tâches de fond échoueront.',
+    );
+    return '';
+  }
+  return jwt.sign(
+    {
+      userId: 'eeg-service-account',
+      name: 'EEG',
+      firstname: 'Service',
+      email: 'service@eeg.internal',
+      services: [
+        {
+          serviceId: externalServicesConfig.eegServiceId,
+          serviceName: 'Électroencéphalographie (EEG)',
+          roleName: 'SERVICE',
+          permissions: [],
+          chu: { id: externalServicesConfig.chuId },
+        },
+      ],
+    },
+    externalServicesConfig.jwtSecret,
+    { expiresIn: '5m' },
+  );
+}

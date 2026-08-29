@@ -3,7 +3,7 @@ import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { getErrorMessage } from '../../common/utils/error.util';
 import { withBasePath } from '../../common/utils/url.util';
-import { externalServicesConfig } from '../../common/config/external-services.config';
+import { externalServicesConfig, signServiceToken } from '../../common/config/external-services.config';
 
 // ─── Shape réelle retournée par GET /prescriptions/eeg ──────────────
 // Contrairement à d'autres domaines de prescription_back (anapath,
@@ -148,7 +148,6 @@ export class PrescriptionClientService {
   private readonly baseUrl: string;
   private readonly chuId: string;
   private readonly serviceId: string;
-  private readonly token: string;
 
   constructor(private readonly httpService: HttpService) {
     this.baseUrl = withBasePath(
@@ -157,12 +156,17 @@ export class PrescriptionClientService {
     );
     this.chuId = externalServicesConfig.chuId;
     this.serviceId = externalServicesConfig.eegServiceId;
-    this.token = externalServicesConfig.prescriptionApiToken;
-    if (!this.token) {
-      this.logger.warn(
-        'PRESCRIPTION_API_TOKEN non défini — les appels vers prescription_back échoueront probablement',
-      );
-    }
+  }
+
+  /**
+   * Jeton pour authentifier un appel sortant : celui de l'utilisateur
+   * connecté si fourni (cas normal, porté par une requête), sinon un jeton
+   * de service auto-signé à la volée (cas des tâches de fond sans requête
+   * utilisateur — voir signServiceToken, remplace l'ancien
+   * PRESCRIPTION_API_TOKEN statique).
+   */
+  private resolveToken(overrideToken?: string): string {
+    return overrideToken ?? signServiceToken();
   }
 
   /**
@@ -181,7 +185,7 @@ export class PrescriptionClientService {
           timeout: 20000,
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${overrideToken ?? this.token}`,
+            Authorization: `Bearer ${this.resolveToken(overrideToken)}`,
           },
         }),
       );
@@ -196,7 +200,7 @@ export class PrescriptionClientService {
         ?.status;
       if (status === 401 || status === 403) {
         this.logger.warn(
-          `prescription_back a rejeté la requête GET /eeg (${status}) — vérifier PRESCRIPTION_API_TOKEN (expiré ou permissions insuffisantes)`,
+          `prescription_back a rejeté la requête GET /eeg (${status}) — vérifier JWT_SECRET (signService) ou permissions insuffisantes`,
         );
       }
       this.logger.warn(
@@ -245,7 +249,7 @@ export class PrescriptionClientService {
             timeout: 20000,
             headers: {
               'Content-Type': 'application/json',
-              Authorization: `Bearer ${this.token}`,
+              Authorization: `Bearer ${signServiceToken()}`,
             },
           },
         ),
@@ -255,7 +259,7 @@ export class PrescriptionClientService {
         ?.status;
       if (status === 401 || status === 403) {
         this.logger.warn(
-          `prescription_back a rejeté la requête PUT statut ${statut} (${status}) — vérifier PRESCRIPTION_API_TOKEN (expiré ou permissions insuffisantes)`,
+          `prescription_back a rejeté la requête PUT statut ${statut} (${status}) — vérifier JWT_SECRET (signService) ou permissions insuffisantes`,
         );
       }
       this.logger.warn(

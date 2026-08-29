@@ -412,8 +412,8 @@ export class DemandesService {
       this.prisma.eegDemande.findMany({
         select: { prescriptionSourceId: true },
       }),
-      // serviceId/chuId du JWT de l'appelant si fournis, sinon repli sur la
-      // config déduite de PRESCRIPTION_API_TOKEN (voir listEegDemandes).
+      // serviceId/chuId du JWT de l'appelant si fournis, sinon repli sur
+      // l'identité propre de ce déploiement (voir listEegDemandes).
       this.prescriptionClient.listEegDemandes(serviceId, chuId, token),
     ]);
 
