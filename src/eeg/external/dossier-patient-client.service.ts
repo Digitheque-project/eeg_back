@@ -21,16 +21,19 @@ import { externalServicesConfig } from '../../common/config/external-services.co
 export class DossierPatientClientService {
   private readonly logger = new Logger(DossierPatientClientService.name);
   private readonly baseUrl: string;
-  private readonly chuId: string;
-  private readonly serviceId: string;
+  // Lus à chaque appel : l'identité est résolue dans le registre après le démarrage.
+  private get chuId(): string {
+    return externalServicesConfig.chuId;
+  }
+  private get serviceId(): string {
+    return externalServicesConfig.eegServiceId;
+  }
 
   constructor(private readonly httpService: HttpService) {
     this.baseUrl = withBasePath(
       externalServicesConfig.dossierPatientApiUrl,
       '/dossier-patient',
     );
-    this.chuId = externalServicesConfig.chuId;
-    this.serviceId = externalServicesConfig.eegServiceId;
   }
 
   private async get(

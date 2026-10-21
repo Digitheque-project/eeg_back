@@ -4,9 +4,15 @@ import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { resolveIdentity } from './common/config/external-services.config';
+import { requestContext } from './common/request-context';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  void resolveIdentity();
+  app.use((req: { headers: { authorization?: string } }, _res: unknown, next: () => void) =>
+    requestContext.run({ authorization: req.headers.authorization }, next),
+  );
 
   // Validation globale des DTOs
   app.useGlobalPipes(

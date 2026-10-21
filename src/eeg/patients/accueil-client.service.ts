@@ -4,7 +4,8 @@ import { firstValueFrom } from 'rxjs';
 import axios from 'axios';
 import { getErrorMessage } from '../../common/utils/error.util';
 import { withBasePath } from '../../common/utils/url.util';
-import { externalServicesConfig } from '../../common/config/external-services.config';
+import { externalServicesConfig, signServiceToken } from '../../common/config/external-services.config';
+import { currentAuthorization } from '../../common/request-context';
 
 export interface AccueilPatientDto {
   id: string;
@@ -46,14 +47,23 @@ export interface UpdatePatientPayload {
 export class AccueilClientService {
   private readonly logger = new Logger(AccueilClientService.name);
   private readonly baseUrl: string;
-  private readonly chuId: string;
+  // Lus à chaque appel : l'identité est résolue dans le registre après le démarrage.
+  private get chuId(): string {
+    return externalServicesConfig.chuId;
+  }
+
+  // Accueil vérifie le jeton auprès du service Users : il faut celui de
+  // l'utilisateur connecté, relayé depuis la requête en cours.
+  private headers(): Record<string, string> {
+    const authorization = currentAuthorization() || `Bearer ${signServiceToken()}`;
+    return { 'Content-Type': 'application/json', Authorization: authorization };
+  }
 
   constructor(private readonly httpService: HttpService) {
     this.baseUrl = withBasePath(
       externalServicesConfig.accueilApiUrl,
       '/accueil',
     );
-    this.chuId = externalServicesConfig.chuId;
   }
 
   private calculateAge(dateNaissance?: string): number | null {
@@ -134,7 +144,7 @@ export class AccueilClientService {
           {
             params: { chuId },
             timeout: 5000,
-            headers: { 'Content-Type': 'application/json' },
+            headers: this.headers(),
           },
         ),
       );
@@ -180,7 +190,7 @@ export class AccueilClientService {
         this.httpService.get<AccueilPatientDto[]>(`${this.baseUrl}/patients`, {
           params: { chuId },
           timeout: 5000,
-          headers: { 'Content-Type': 'application/json' },
+          headers: this.headers(),
         }),
       );
 
@@ -223,7 +233,7 @@ export class AccueilClientService {
           {
             params: { chuId },
             timeout: 5000,
-            headers: { 'Content-Type': 'application/json' },
+            headers: this.headers(),
           },
         ),
       );

@@ -3,7 +3,7 @@
  * brute d'une variable d'environnement et du chemin de l'API de ce service.
  *
  * La valeur d'env doit être UNIQUEMENT la base URL (protocole + hôte), sans
- * préfixe ni suffixe — ex. `https://acceuil-back.onrender.com`. Le chemin
+ * préfixe ni suffixe — ex. `https://passerelle.exemple`. Le chemin
  * (`/accueil`, `/prescriptions`, `/dossier-patient`…) est porté par le code,
  * pas par la configuration.
  *

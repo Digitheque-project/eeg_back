@@ -8,22 +8,12 @@ import * as jwt from 'jsonwebtoken';
 // Notification, Dossier patient, Upload...) — seul le SUFFIXE de chemin
 // (propre à chaque service, cf. registre gateway) reste dans le code.
 //
-// Aucun id de CHU ni de service EEG n'est plus utilisé en variable
-// d'environnement pour un appel porté par une requête utilisateur : ces deux
-// identités sont dérivées du JWT de l'appelant (voir jwt-auth.guard.ts, qui
-// les expose sur req.user.chuId/serviceId).
-//
-// SSO_EEG_SERVICE_ID / CHU_ID restent des variables ici, mais avec un rôle
-// différent : ce ne sont PAS des identités "empruntées" à un tiers pour
-// authentifier des appels, ce sont les constantes d'IDENTITÉ PROPRE de ce
-// déploiement (qui suis-je dans le registre multi-CHU/multi-service), au
-// même titre que PORT — nécessaires uniquement pour la tâche de fond sans
-// requête utilisateur (cron de synchronisation), qui n'a structurellement
-// aucun JWT d'où les extraire.
-//
-// Une valeur manquante n'empêche pas le démarrage (les clients HTTP sont déjà
-// tous défensifs — try/catch, ne throw jamais) mais est signalée bruyamment
-// au boot pour qu'une variable oubliée soit visible immédiatement.
+// Aucun id (CHU, service EEG, chef de service) en configuration : pour une
+// requête utilisateur, ils viennent du JWT (jwt-auth.guard.ts) ; pour les
+// tâches de fond sans utilisateur (cron), ils sont résolus au démarrage par
+// NOM dans le registre central (voir resolveIdentity). CHU_ID,
+// SSO_EEG_SERVICE_ID et DEFAULT_CHEF_SERVICE_USER_ID restent acceptées comme
+// surcharges exceptionnelles.
 
 const logger = new Logger('ExternalServicesConfig');
 
@@ -40,6 +30,13 @@ function readEnv(name: string): string {
 
 const GATEWAY_URL = readEnv('GATEWAY_URL').replace(/\/+$/, '');
 
+// Identité de ce déploiement (surcharges facultatives, sinon resolveIdentity).
+const identity = {
+  chuId: process.env.CHU_ID ?? '',
+  serviceId: process.env.SSO_EEG_SERVICE_ID ?? '',
+  chefUserId: process.env.DEFAULT_CHEF_SERVICE_USER_ID ?? '',
+};
+
 function gatewayPath(prefix: string): string {
   return GATEWAY_URL ? `${GATEWAY_URL}/${prefix}` : '';
 }
@@ -53,8 +50,18 @@ export const externalServicesConfig = {
   jwtSecret: readEnv('JWT_SECRET'),
 
   // Identité propre de ce déploiement — voir commentaire en tête de fichier.
-  chuId: readEnv('CHU_ID'),
-  eegServiceId: readEnv('SSO_EEG_SERVICE_ID'),
+  get chuId(): string {
+    return identity.chuId;
+  },
+  set chuId(value: string) {
+    identity.chuId = value;
+  },
+  get eegServiceId(): string {
+    return identity.serviceId;
+  },
+  set eegServiceId(value: string) {
+    identity.serviceId = value;
+  },
 
   // Toutes les URLs directes ci-dessous passent désormais par la passerelle
   // unique — un seul GATEWAY_URL à configurer, plus aucune URL de service
@@ -78,8 +85,68 @@ export const externalServicesConfig = {
   // Prescripteur de repli quand une prescription externe n'en fournit aucun
   // (id d'un vrai CHEF_SERVICE côté auth-service). Vide tant que les vrais
   // utilisateurs ne sont pas encore créés — voir DemandesService.resolvePrescripteurId.
-  defaultChefServiceUserId: process.env.DEFAULT_CHEF_SERVICE_USER_ID ?? '',
+  get defaultChefServiceUserId(): string {
+    return identity.chefUserId;
+  },
+  set defaultChefServiceUserId(value: string) {
+    identity.chefUserId = value;
+  },
 };
+
+// Nom du service EEG dans le registre central.
+const REGISTRY_SERVICE_NAME =
+  process.env.REGISTRY_SERVICE_NAME || 'Électroencéphalographie (EEG)';
+
+/**
+ * Résout l'identité de ce déploiement par NOM dans le registre central
+ * (service EEG, son CHU) et le chef de service par son RÔLE (CHEF_SERVICE)
+ * dans ce service. Ne throw jamais : réessaie tant que la passerelle ou le
+ * registre se réveillent, puis rafraîchit toutes les 10 minutes.
+ */
+export async function resolveIdentity(attempt = 1): Promise<void> {
+  const headers = { Authorization: `Bearer ${signServiceToken()}` };
+  try {
+    if (!GATEWAY_URL) throw new Error('GATEWAY_URL manquant');
+    if (!process.env.SSO_EEG_SERVICE_ID || !process.env.CHU_ID) {
+      const res = await fetch(`${GATEWAY_URL}/services`, { headers, signal: AbortSignal.timeout(30000) });
+      if (!res.ok) throw new Error(`GET /services : HTTP ${res.status}`);
+      const body = (await res.json()) as unknown;
+      const list = (Array.isArray(body) ? body : ((body as { services?: unknown[] })?.services ?? [])) as Array<{ id?: string; name?: string; chuId?: string }>;
+      const found = list.find((s) => (s?.name ?? '').trim() === REGISTRY_SERVICE_NAME);
+      if (!found?.id) throw new Error(`service "${REGISTRY_SERVICE_NAME}" introuvable dans le registre`);
+      if (!process.env.SSO_EEG_SERVICE_ID) identity.serviceId = found.id;
+      if (!process.env.CHU_ID && found.chuId) identity.chuId = found.chuId;
+    }
+    if (!process.env.DEFAULT_CHEF_SERVICE_USER_ID) {
+      identity.chefUserId = await findChefServiceUserId(identity.serviceId, headers);
+    }
+    logger.log(`Identité résolue : serviceId=${identity.serviceId}, chuId=${identity.chuId}, chef=${identity.chefUserId || '(aucun)'}`);
+  } catch (error) {
+    const delay = Math.min(60, 5 * attempt) * 1000;
+    logger.warn(`Résolution de l'identité échouée (${(error as Error).message}), nouvel essai dans ${delay / 1000} s`);
+    if (attempt < 20) setTimeout(() => void resolveIdentity(attempt + 1), delay).unref();
+    return;
+  }
+  if (attempt === 1) setInterval(() => void resolveIdentity(2), 10 * 60 * 1000).unref();
+}
+
+async function findChefServiceUserId(serviceId: string, headers: Record<string, string>): Promise<string> {
+  if (!serviceId) return '';
+  const rolesRes = await fetch(`${GATEWAY_URL}/roles`, { headers, signal: AbortSignal.timeout(15000) });
+  if (!rolesRes.ok) return '';
+  const roles = (await rolesRes.json()) as Array<{ id?: string; name?: string; serviceId?: string }>;
+  const chef = (Array.isArray(roles) ? roles : []).find(
+    (r) => r?.serviceId === serviceId && (r?.name ?? '').toUpperCase() === 'CHEF_SERVICE',
+  );
+  if (!chef?.id) return '';
+  const usrRes = await fetch(
+    `${GATEWAY_URL}/user-service-roles?serviceId=${encodeURIComponent(serviceId)}&roleId=${encodeURIComponent(chef.id)}`,
+    { headers, signal: AbortSignal.timeout(15000) },
+  );
+  if (!usrRes.ok) return '';
+  const list = (await usrRes.json()) as Array<{ user?: { id?: string } }>;
+  return (Array.isArray(list) ? list : []).find((a) => a?.user?.id)?.user?.id ?? '';
+}
 
 /**
  * Jeton de service auto-signé pour les appels sortants sans requête

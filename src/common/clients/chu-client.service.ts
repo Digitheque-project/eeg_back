@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { getErrorMessage } from '../utils/error.util';
-import { externalServicesConfig } from '../config/external-services.config';
+import { externalServicesConfig, signServiceToken } from '../config/external-services.config';
 
 export interface ChuInfoDto {
   id: string;
@@ -31,14 +31,17 @@ export class ChuClientService {
   // confondre, ce sont deux backends séparés malgré des noms proches.
   private readonly chuServiceBaseUrl: string;
   private readonly serviceRegistryBaseUrl: string;
-  private readonly chuId: string;
-  private readonly serviceId: string;
+  // Lus à chaque appel : l'identité est résolue dans le registre après le démarrage.
+  private get chuId(): string {
+    return externalServicesConfig.chuId;
+  }
+  private get serviceId(): string {
+    return externalServicesConfig.eegServiceId;
+  }
 
   constructor(private readonly httpService: HttpService) {
     this.chuServiceBaseUrl = externalServicesConfig.chuServiceUrl;
     this.serviceRegistryBaseUrl = externalServicesConfig.chuApiUrl;
-    this.chuId = externalServicesConfig.chuId;
-    this.serviceId = externalServicesConfig.eegServiceId;
   }
 
   /**
@@ -75,10 +78,10 @@ export class ChuClientService {
     try {
       const response = await firstValueFrom(
         this.httpService.get<ServiceInfoDto>(
-          `${this.serviceRegistryBaseUrl}/services/${serviceId}`,
+          `${this.serviceRegistryBaseUrl}/${serviceId}`,
           {
             timeout: 5000,
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${signServiceToken()}` },
           },
         ),
       );
