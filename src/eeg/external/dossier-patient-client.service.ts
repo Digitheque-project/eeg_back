@@ -41,11 +41,14 @@ export class DossierPatientClientService {
     patientId: string,
     token: string | undefined,
     label: string,
+    toutLeChu = false,
   ): Promise<unknown | null> {
     try {
       const response = await firstValueFrom(
         this.httpService.get(`${this.baseUrl}${path}`, {
-          params: { chuId: this.chuId, serviceId: this.serviceId, patientId },
+          params: toutLeChu
+            ? { chuId: this.chuId, patientId }
+            : { chuId: this.chuId, serviceId: this.serviceId, patientId },
           timeout: 8000,
           headers: { Authorization: `Bearer ${token ?? ''}` },
         }),
@@ -73,7 +76,8 @@ export class DossierPatientClientService {
   }
 
   getDiagnostics(patientId: string, token?: string) {
-    return this.get('/diagnostics', patientId, token, 'diagnostics');
+    // Sans serviceId : les diagnostics du patient posés dans tout le CHU, pas seulement à l'EEG.
+    return this.get('/diagnostics', patientId, token, 'diagnostics', true);
   }
 
   getExamenNeurologique(patientId: string, token?: string) {
