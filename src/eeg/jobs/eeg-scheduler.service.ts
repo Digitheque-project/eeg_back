@@ -42,7 +42,9 @@ export class EegSchedulerService implements OnModuleInit {
   // technicien n'existe qu'en mémoire côté service Prescription : elle est
   // invisible aux rapports (rapports.controller.ts) et à l'alerte STAT
   // ci-dessous, qui ne portent que sur la table locale.
-  @Cron('*/30 * * * * *')
+  // Chaque minute (était 30 s). Toutes les interrogations passent par la passerelle, que le pare-feu de
+  // l'hébergeur (Cloudflare) bloque au-delà d'un certain débit (429).
+  @Cron(CronExpression.EVERY_MINUTE)
   async synchroniserPrescriptions() {
     if (this.isSyncingPrescriptions) return;
     this.isSyncingPrescriptions = true;
