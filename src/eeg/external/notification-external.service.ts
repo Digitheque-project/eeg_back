@@ -3,7 +3,10 @@ import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import axios from 'axios';
 import { getErrorMessage } from '../../common/utils/error.util';
-import { externalServicesConfig } from '../../common/config/external-services.config';
+import {
+  externalServicesConfig,
+  signServiceToken,
+} from '../../common/config/external-services.config';
 
 @Injectable()
 export class NotificationExternalService {
@@ -28,7 +31,11 @@ export class NotificationExternalService {
           `${this.baseUrl}/notifications/service`,
           notifyServiceDto,
           {
-            headers: { 'Content-Type': 'application/json' },
+            // Le service de notifications refuse tout appel sans jeton signé.
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${signServiceToken()}`,
+            },
           },
         ),
       );
