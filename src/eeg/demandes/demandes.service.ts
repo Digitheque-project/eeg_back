@@ -863,19 +863,30 @@ export class DemandesService {
       }
     }
 
-    this.notificationService
-      .sendNotification({
-        type: estCritique ? 'RESULTAT_CRITIQUE' : 'RESULTAT_DISPONIBLE',
-        motif: estCritique
-          ? `Résultat EEG CRITIQUE pour la demande ${demandeMaj.numeroEEG} — à consulter immédiatement`
-          : `Résultat EEG disponible pour la demande ${demandeMaj.numeroEEG}`,
-        // Un résultat critique force le niveau d'urgence de la notification
-        // externe, quelle que soit l'urgence d'origine de la demande.
-        urgence: estCritique ? 'STAT' : d.urgence,
-        sourceServiceId: externalServicesConfig.eegServiceId,
-        sourceServiceName: 'EEG',
-        patientId: demandeMaj.patientId,
-        sentAt: new Date().toISOString(),
+    // Le résultat revient au service qui a prescrit l'examen, pas à l'EEG lui-même.
+    Promise.resolve(
+      this.prescriptionClient.findDemandeEegById(d.prescriptionSourceId ?? ''),
+    )
+      .then((source) => {
+        if (!source?.serviceIdSource) {
+          this.logger.warn(
+            `Service prescripteur introuvable pour ${demandeMaj.numeroEEG} : résultat non notifié`,
+          );
+          return null;
+        }
+        return this.notificationService.sendNotification({
+          type: estCritique ? 'RESULTAT_CRITIQUE' : 'RESULTAT_DISPONIBLE',
+          motif: estCritique
+            ? `Résultat EEG CRITIQUE pour la demande ${demandeMaj.numeroEEG} — à consulter immédiatement`
+            : `Résultat EEG disponible pour la demande ${demandeMaj.numeroEEG}`,
+          // Un résultat critique force le niveau d'urgence de la notification
+          // externe, quelle que soit l'urgence d'origine de la demande.
+          urgence: estCritique ? 'STAT' : d.urgence,
+          sourceServiceId: source.serviceIdSource,
+          sourceServiceName: 'EEG',
+          patientId: demandeMaj.patientId,
+          sentAt: new Date().toISOString(),
+        });
       })
       .catch((err: unknown) =>
         console.error('Erreur notification:', getErrorMessage(err)),

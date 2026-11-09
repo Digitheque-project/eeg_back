@@ -58,8 +58,8 @@ export class NotificationExternalService {
 
   private mapToNotifyServiceDto(dto: any) {
     const typeTitleMap: Record<string, string> = {
-      RESULTAT_DISPONIBLE: 'Nouveau résultat EEG disponible',
-      RESULTAT_CRITIQUE: 'Résultat EEG CRITIQUE — action requise',
+      RESULTAT_DISPONIBLE: 'Résultat EEG disponible',
+      RESULTAT_CRITIQUE: 'Résultat EEG critique — action requise',
       DEMANDE_CREEE: 'Nouvelle demande EEG',
       DEMANDE_VALIDEE: 'Demande EEG validée',
       DEMANDE_REJETEE: 'Demande EEG rejetée',
@@ -71,7 +71,7 @@ export class NotificationExternalService {
     };
 
     return {
-      serviceId: dto.sourceServiceId || externalServicesConfig.eegServiceId,
+      serviceId: dto.sourceServiceId,
       title: typeTitleMap[dto.type] || `Notification EEG – ${dto.type || 'info'}`,
       message: dto.motif || '',
       type: typeLevelMap[dto.urgence] || 'info',
