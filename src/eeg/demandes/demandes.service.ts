@@ -96,8 +96,9 @@ export class DemandesService {
     // ── Cas B : id fourni par le service User → utilisé tel quel ────
     return {
       prescripteurId: externalId,
-      prescripteurExterneNom: null,
-      prescripteurExternePrenom: null,
+      // Conservé : affiché si le compte du prescripteur n'est pas retrouvé.
+      prescripteurExterneNom: externalNomManuel ?? null,
+      prescripteurExternePrenom: externalPrenomManuel ?? null,
     };
   }
 
@@ -250,9 +251,8 @@ export class DemandesService {
               message: `${demande.numeroEEG} — ${demande.typeEEG}`,
               patientId: demande.patientId,
               demandeId: demande.id,
-              // Concerne le TECHNICIEN (à lui de planifier/réaliser) — pas le
-              // CHEF_SERVICE, qui n'agit qu'une fois l'examen réalisé.
-              roleCible: 'TECHNICIEN',
+              // Tout le service : le chef de service planifie aussi les RDV.
+              roleCible: null,
             },
           });
         } catch (error) {
@@ -434,9 +434,8 @@ export class DemandesService {
     });
 
     const toutes = locales.filter(
-      (d) =>
-        !['RESULTAT_DISPONIBLE', 'ANNULEE'].includes(d.statut) &&
-        this.aUnPrescripteur(d),
+      // Une demande sans prescripteur connu reste affichée : elle doit être traitée.
+      (d) => !['RESULTAT_DISPONIBLE', 'ANNULEE'].includes(d.statut),
     );
 
     const avecHeure = await this.attachHeureArrivee(toutes);

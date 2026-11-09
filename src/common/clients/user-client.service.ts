@@ -2,7 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { getErrorMessage } from '../utils/error.util';
-import { externalServicesConfig } from '../config/external-services.config';
+import {
+  externalServicesConfig,
+  signServiceToken,
+} from '../config/external-services.config';
 
 export interface UserServicesDto {
   id: string;
@@ -42,6 +45,7 @@ export class UserClientService {
           headers: {
             'Content-Type': 'application/json',
             'x-api-key': this.apiKey,
+            Authorization: `Bearer ${signServiceToken()}`,
           },
         }),
       );

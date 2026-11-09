@@ -218,8 +218,8 @@ describe('DemandesService', () => {
         expect.objectContaining({
           data: expect.objectContaining({
             prescripteurId: 'ext-doc-001',
-            prescripteurExterneNom: null,
-            prescripteurExternePrenom: null,
+            prescripteurExterneNom: 'ShouldNot',
+            prescripteurExternePrenom: 'BeUsed',
             prescripteurExterne: false,
           }),
         }),
@@ -257,7 +257,7 @@ describe('DemandesService', () => {
 
     // Sans roleCible, un TECHNICIEN et un CHEF_SERVICE voyaient exactement
     // les mêmes notifications — aucune "logique métier" par rôle.
-    it('should target NOUVELLE_DEMANDE notifications at TECHNICIEN', async () => {
+    it('should send NOUVELLE_DEMANDE notifications to the whole EEG team', async () => {
       prisma.eegDemande.create.mockResolvedValue({
         id: 'local-005',
         numeroEEG: 'EEG-005',
@@ -282,7 +282,7 @@ describe('DemandesService', () => {
         expect.objectContaining({
           data: expect.objectContaining({
             type: 'NOUVELLE_DEMANDE',
-            roleCible: 'TECHNICIEN',
+            roleCible: null,
           }),
         }),
       );

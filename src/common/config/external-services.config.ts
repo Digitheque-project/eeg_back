@@ -67,9 +67,10 @@ export const externalServicesConfig = {
   // unique — un seul GATEWAY_URL à configurer, plus aucune URL de service
   // tiers en variable d'environnement séparée.
   chuApiUrl: gatewayPath('services'), // registre service-service (résout un service par id, pas le CHU)
-  chuServiceUrl: gatewayPath('chu'), // prises en charge (entreprises partenaires)
+  chuServiceUrl: GATEWAY_URL, // prises en charge (entreprises partenaires)
   accueilApiUrl: gatewayPath('accueil'),
-  userServiceUrl: gatewayPath('users'),
+  // Racine de la passerelle : les chemins appelés commencent déjà par /users et /files.
+  userServiceUrl: GATEWAY_URL,
   internalApiKey: readEnv('INTERNAL_API_KEY'),
   prescriptionApiUrl: gatewayPath('prescriptions'),
   // Le registre gateway proxifie ce service sous /notifications (pluriel,
@@ -79,7 +80,7 @@ export const externalServicesConfig = {
   // le point d'appel (notification-external.service.ts) ajoute déjà lui-même
   // /notifications, on garde ici l'origine brute de la gateway, sans suffixe.
   notificationServiceUrl: GATEWAY_URL,
-  uploadServiceUrl: gatewayPath('upload'),
+  uploadServiceUrl: GATEWAY_URL,
   dossierPatientApiUrl: gatewayPath('dossier-patient'),
 
   // Prescripteur de repli quand une prescription externe n'en fournit aucun

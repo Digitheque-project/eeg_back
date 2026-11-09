@@ -114,6 +114,7 @@ export class ArchivesController {
                 select: {
                   heureDebut: true,
                   heureFin: true,
+                  dureeMinutes: true,
                   renseignementClinique: true,
                   dateRdv: true,
                 },
@@ -155,6 +156,9 @@ export class ArchivesController {
           dateExamen: r.demande.dateRealisation ?? r.demande.dateRDV,
           heuresExamen: r.demande.rdv?.heureDebut ?? null,
           medecinValidateur,
+          // Aucune saisie de durée à la réalisation : durée prévue au RDV.
+          dureeEnregistrement:
+            r.dureeEnregistrement ?? r.demande.rdv?.dureeMinutes ?? null,
           demande: {
             ...r.demande,
             patient,
