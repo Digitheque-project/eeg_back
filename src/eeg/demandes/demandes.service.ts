@@ -644,11 +644,16 @@ export class DemandesService {
         data: { statut: 'PLANIFIEE', dateRDV: dateRdv, technicienId },
       }),
     ]);
-    this.syncStatutToSource(
-      d.prescriptionParentId,
-      d.prescriptionSourceId,
-      'PLANIFIEE',
-    );
+    // La date du rendez-vous d'abord (le prescripteur la reçoit), puis le statut.
+    if (d.prescriptionParentId) {
+      void this.prescriptionClient
+        .updateRdv(d.prescriptionParentId, dateRdv, dto.heureDebut)
+        .then(() =>
+          this.syncStatutToSource(d.prescriptionParentId, d.prescriptionSourceId, 'PLANIFIEE'),
+        );
+    } else {
+      this.syncStatutToSource(d.prescriptionParentId, d.prescriptionSourceId, 'PLANIFIEE');
+    }
     await this.auditService.log({
       utilisateurId: technicienId,
       role,

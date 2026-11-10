@@ -230,6 +230,32 @@ export class PrescriptionClientService {
   }
 
   /**
+   * Transmet la date du rendez-vous à prescription_back (PATCH /eeg/{id}/rdv),
+   * qui prévient le service prescripteur et l'Accueil. Defensive — never throws.
+   */
+  async updateRdv(prescriptionId: string, rdvDate: Date, rdvTime?: string): Promise<void> {
+    try {
+      await firstValueFrom(
+        this.httpService.patch(
+          `${this.baseUrl}/eeg/${prescriptionId}/rdv`,
+          { rdvDate: rdvDate.toISOString().slice(0, 10), ...(rdvTime ? { rdvTime } : {}) },
+          {
+            timeout: 20000,
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${signServiceToken()}`,
+            },
+          },
+        ),
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Rendez-vous de la prescription ${prescriptionId} non transmis : ${(error as Error).message}`,
+      );
+    }
+  }
+
+  /**
    * Répercute un changement de statut EEG sur la prescription dans
    * prescription_back (PATCH /eeg/{id}/statut — modèle plat, pas de
    * sous-ressource demandes). `demandeId` vaut toujours `prescriptionId`
