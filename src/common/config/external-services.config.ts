@@ -45,8 +45,8 @@ export const externalServicesConfig = {
   // Secret HS256 partagé avec le service SSO externe — signe les JWT que
   // JwtAuthGuard vérifie, ET signe le token de service auto-généré
   // ci-dessous (signServiceToken). DOIT être le même secret que celui qui
-  // signe réellement les JWT utilisateurs (vérifié en conditions réelles :
-  // secret123, partagé avec la gateway et les autres services).
+  // signe réellement les JWT utilisateurs :
+  // même valeur que la gateway et les autres services.
   jwtSecret: readEnv('JWT_SECRET'),
 
   // Identité propre de ce déploiement — voir commentaire en tête de fichier.
