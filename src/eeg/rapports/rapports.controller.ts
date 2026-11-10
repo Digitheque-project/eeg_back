@@ -59,6 +59,8 @@ export class RapportsController {
     return where;
   }
 
+  // Les compteurs du tableau de bord sont affichés à tous les rôles du service.
+  @Roles('TECHNICIEN', 'CHEF_SERVICE', 'MAJOR_SERVICE')
   @Get('activite')
   @ApiOperation({ summary: 'Volumes des demandes EEG' })
   @ApiQuery({ name: 'dateDebut', required: false, description: 'YYYY-MM-DD' })
