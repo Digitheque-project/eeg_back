@@ -95,6 +95,8 @@ export class ArchivesController {
               dateCreation: true,
               patientId: true,
               prescripteurId: true,
+              // Archive : qui a réalisé l'enregistrement.
+              technicienId: true,
               // Champs nécessaires au compte rendu officiel CHUA généré
               // côté front : date/heure de réalisation, motif, snapshot
               // clinique de la prescription et prescripteur externe.
@@ -135,10 +137,11 @@ export class ArchivesController {
 
     const data = await Promise.all(
       resultats.map(async (r) => {
-        const [patient, prescripteur, medecinValidateur] = await Promise.all([
+        const [patient, prescripteur, medecinValidateur, technicien] = await Promise.all([
           this.patientLookup.getPatientInfo(r.demande.patientId),
           this.userLookup.getUserInfo(r.demande.prescripteurId),
           this.userLookup.getUserInfo(r.medecinValidateurId),
+          this.userLookup.getUserInfo(r.demande.technicienId),
         ]);
         // Le générateur de compte rendu (eeg_front) lit ces clés à la RACINE
         // du résultat, en plus de `demande.patient.*` : on les y expose donc
@@ -156,6 +159,7 @@ export class ArchivesController {
           dateExamen: r.demande.dateRealisation ?? r.demande.dateRDV,
           heuresExamen: r.demande.rdv?.heureDebut ?? null,
           medecinValidateur,
+          technicien,
           // Aucune saisie de durée à la réalisation : durée prévue au RDV.
           dureeEnregistrement:
             r.dureeEnregistrement ?? r.demande.rdv?.dureeMinutes ?? null,
