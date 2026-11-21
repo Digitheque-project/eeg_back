@@ -5,6 +5,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { PatientLookupService } from '../patients/patient-lookup.service';
 import { AccueilClientService } from '../patients/accueil-client.service';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { jourDuChu } from '../../common/jour-chu';
 
 // Seuil retenu pour distinguer enfant / adulte dans les statistiques du
 // service (confirmé avec le major de service).
@@ -230,7 +231,7 @@ export class RapportsController {
 
     const parJour: Record<string, { total: number; traitees: number; annulees: number }> = {};
     for (const d of demandes) {
-      const jour = d.dateCreation.toISOString().slice(0, 10);
+      const jour = jourDuChu(d.dateCreation);
       if (!parJour[jour]) parJour[jour] = { total: 0, traitees: 0, annulees: 0 };
       parJour[jour].total++;
       if (d.statut === 'RESULTAT_DISPONIBLE') parJour[jour].traitees++;
