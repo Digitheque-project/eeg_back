@@ -188,7 +188,7 @@ describe('PrescriptionClientService', () => {
 
       await expect(
         service.updateDemandeStatut('rx-001', 'rx-001', 'EN_COURS'),
-      ).resolves.toBeUndefined();
+      ).resolves.toBe(false);
     });
   });
 });

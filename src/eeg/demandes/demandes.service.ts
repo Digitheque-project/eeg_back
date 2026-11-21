@@ -14,6 +14,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { PatientLookupService } from '../patients/patient-lookup.service';
 import { UserLookupService } from '../../common/clients/user-lookup.service';
 import { getErrorMessage } from '../../common/utils/error.util';
+import { RattrapageStatuts, statutARenvoyer } from '../../common/rattrapage-statut';
 import { ajouterMinutes } from '../../common/utils/date.util';
 import { PlanifierRdvDto } from './dto/planifier-rdv.dto';
 import { ArchiverResultatDto } from './dto/archiver-resultat.dto';
@@ -22,6 +23,7 @@ import { externalServicesConfig } from '../../common/config/external-services.co
 @Injectable()
 export class DemandesService {
   private readonly logger = new Logger(DemandesService.name);
+  private readonly rattrapage = new RattrapageStatuts();
 
   // Verrou en mémoire (par processus) contre la course entre le cron
   // (syncPendingPrescriptions, toutes les 30s) et getWorklist (déclenché à
@@ -271,10 +273,17 @@ export class DemandesService {
   async syncPendingPrescriptions(): Promise<number> {
     const [locales, flatDemandes] = await Promise.all([
       this.prisma.eegDemande.findMany({
-        select: { prescriptionSourceId: true },
+        select: {
+          prescriptionSourceId: true,
+          prescriptionParentId: true,
+          statut: true,
+          motifAnnulation: true,
+        },
       }),
       this.prescriptionClient.listEegDemandes(),
     ]);
+
+    await this.rattraperStatuts(locales, flatDemandes);
 
     const sourceIdsConnus = new Set(
       locales
@@ -283,6 +292,46 @@ export class DemandesService {
     );
 
     return this.promouvoirNouvelles(flatDemandes, sourceIdsConnus);
+  }
+
+  // ─── Rattrapage des statuts non arrivés au service Prescription ───
+  // Un envoi de statut échoué n'était jamais refait : la prescription restait
+  // « planifiée » côté prescripteur alors que le résultat était disponible.
+  private async rattraperStatuts(
+    locales: {
+      prescriptionSourceId: string | null;
+      prescriptionParentId: string | null;
+      statut: string;
+      motifAnnulation: string | null;
+    }[],
+    distantes: { id: string; statut?: string }[],
+  ) {
+    const statutDistant = new Map(distantes.map((d) => [d.id, d.statut]));
+    for (const l of locales) {
+      if (!l.prescriptionSourceId || !l.prescriptionParentId) continue;
+      if (!statutDistant.has(l.prescriptionSourceId)) continue;
+      const statut = statutARenvoyer(
+        l.statut,
+        statutDistant.get(l.prescriptionSourceId),
+        ['CREEE', 'PLANIFIEE', 'EN_COURS', 'RESULTAT_DISPONIBLE'],
+        ['RESULTAT_DISPONIBLE', 'ANNULEE', 'REFUSEE'],
+      );
+      if (!statut) continue;
+      const cle = `${l.prescriptionSourceId}:${statut}`;
+      if (!this.rattrapage.peutTenter(cle)) continue;
+      const ok = await this.prescriptionClient.updateDemandeStatut(
+        l.prescriptionParentId,
+        l.prescriptionSourceId,
+        statut,
+        statut === 'ANNULEE' ? l.motifAnnulation || 'Annulée' : undefined,
+      );
+      this.rattrapage.resultat(cle, ok);
+      if (ok) {
+        this.logger.log(
+          `Rattrapage : statut ${statut} renvoyé pour la prescription ${l.prescriptionSourceId}`,
+        );
+      }
+    }
   }
 
   // ─── Répercussion statut vers prescription_back ───────────────────

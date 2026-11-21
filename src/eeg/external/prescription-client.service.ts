@@ -76,6 +76,8 @@ export interface PrescriptionEegDemandeFlat {
   serviceIdSource?: string;
   serviceIdDest?: string;
   createdAt?: string;
+  /** Statut de la prescription côté service Prescription (rattrapage). */
+  statut?: string;
   // ─── Snapshot clinique pris à la prescription ──────────────────────
   // Affiché en lecture seule à l'interprétation (CHEF_SERVICE) au lieu
   // d'être ressaisi — voir demandes.service.ts (promoteToLocal,
@@ -134,6 +136,7 @@ function flattenPrescriptions(
     serviceIdSource: rx.serviceIdSource,
     serviceIdDest: rx.serviceIdDest,
     createdAt: rx.createdAt,
+    statut: rx.statut,
     aeActuel: rx.aeActuel,
     agePremiereCrise: rx.agePremiereCrise,
     dpm: rx.dpm,
@@ -261,14 +264,14 @@ export class PrescriptionClientService {
    * sous-ressource demandes). `demandeId` vaut toujours `prescriptionId`
    * dans ce domaine ; le paramètre est conservé pour ne pas changer la
    * signature côté demandes.service.ts.
-   * Defensive — never throws.
+   * Defensive — never throws. Renvoie false si l'envoi a échoué.
    */
   async updateDemandeStatut(
     prescriptionId: string,
     demandeId: string,
     statut: string,
     motif?: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       await firstValueFrom(
         this.httpService.patch(
@@ -283,6 +286,7 @@ export class PrescriptionClientService {
           },
         ),
       );
+      return true;
     } catch (error) {
       const status = (error as { response?: { status?: number } }).response
         ?.status;
@@ -296,6 +300,7 @@ export class PrescriptionClientService {
           `prescription ${prescriptionId}/demande ${demandeId}: ` +
           getErrorMessage(error),
       );
+      return false;
     }
   }
 }
