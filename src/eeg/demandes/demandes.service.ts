@@ -921,18 +921,24 @@ export class DemandesService {
     Promise.resolve(
       this.prescriptionClient.findDemandeEegById(d.prescriptionSourceId ?? ''),
     )
-      .then((source) => {
+      .then(async (source) => {
         if (!source?.serviceIdSource) {
           this.logger.warn(
             `Service prescripteur introuvable pour ${demandeMaj.numeroEEG} : résultat non notifié`,
           );
           return null;
         }
+        // Nom du patient dans le message (avant : seulement le n° de demande EEG).
+        const pat = demandeMaj.patientId
+          ? await this.patientLookup.getPatientInfo(demandeMaj.patientId).catch(() => null)
+          : null;
+        const nomPatient = [pat?.prenom, pat?.nom].filter(Boolean).join(' ').trim();
+        const pour = nomPatient ? `${nomPatient} (demande ${demandeMaj.numeroEEG})` : `la demande ${demandeMaj.numeroEEG}`;
         return this.notificationService.sendNotification({
           type: estCritique ? 'RESULTAT_CRITIQUE' : 'RESULTAT_DISPONIBLE',
           motif: estCritique
-            ? `Résultat EEG CRITIQUE pour la demande ${demandeMaj.numeroEEG} — à consulter immédiatement`
-            : `Résultat EEG disponible pour la demande ${demandeMaj.numeroEEG}`,
+            ? `Résultat EEG CRITIQUE pour ${pour} — à consulter immédiatement`
+            : `Résultat EEG disponible pour ${pour}`,
           // Un résultat critique force le niveau d'urgence de la notification
           // externe, quelle que soit l'urgence d'origine de la demande.
           urgence: estCritique ? 'STAT' : d.urgence,
